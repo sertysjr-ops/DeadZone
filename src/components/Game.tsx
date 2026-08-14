@@ -701,27 +701,69 @@ export default function Game() {
 
           {!menuOpen && !gameOver && (
             <>
-              {/* HUD */}
-              <div className="pointer-events-none fixed top-4 left-4 right-4 z-40 flex justify-between items-start">
-                <div className="space-y-2">
-                  <div className="flex items-center gap-2">
-                    <span className="text-red-500 font-bold">HP</span>
-                    <div className="w-40 h-4 bg-zinc-900 border border-zinc-700">
-                      <div className="h-full bg-red-600 transition-all" style={{ width: `${health}%` }} />
-                    </div>
-                    <span className="text-sm">{Math.ceil(health)}</span>
-                  </div>
-                  <div className="text-yellow-400 text-sm">AMMO {ammo} <span className="text-zinc-500 text-xs">(R reload)</span></div>
-                </div>
-                <div className="text-right">
-                  <div className="text-cyan-400 font-bold text-lg">WAVE {wave}</div>
-                  <div className="text-zinc-300 text-sm">SCORE {score}</div>
+              {/* DAMAGE VIGNETTE */}
+              <div
+                className="pointer-events-none fixed inset-0 z-30 transition-opacity duration-200"
+                style={{
+                  background: `radial-gradient(circle, transparent 55%, rgba(220,38,38,${Math.max(0, 1 - health / 35)}) 100%)`,
+                  opacity: health < 35 ? 1 : 0,
+                }}
+              />
+
+              {/* CROSSHAIR */}
+              <div className="pointer-events-none fixed inset-0 z-40 flex items-center justify-center">
+                <div className="relative w-8 h-8">
+                  <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-1 h-1 bg-red-500 rounded-full shadow-[0_0_8px_rgba(220,38,38,0.9)]" />
+                  <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[2px] h-2 bg-red-500/80" />
+                  <div className="absolute bottom-0 left-1/2 -translate-x-1/2 w-[2px] h-2 bg-red-500/80" />
+                  <div className="absolute left-0 top-1/2 -translate-y-1/2 h-[2px] w-2 bg-red-500/80" />
+                  <div className="absolute right-0 top-1/2 -translate-y-1/2 h-[2px] w-2 bg-red-500/80" />
                 </div>
               </div>
 
-              <div className="pointer-events-none fixed bottom-6 left-0 right-0 z-40 flex justify-center">
-                <div className="rounded bg-black/60 px-4 py-2 text-xs text-zinc-300">
-                  WASD move · Mouse aim · Click shoot · R reload · ESC menu
+              {/* TOP LEFT: HP + STAMINA */}
+              <div className="pointer-events-none fixed top-5 left-5 z-40 flex flex-col gap-2">
+                <div className="bg-black/60 border border-red-900/40 backdrop-blur-sm p-3 rounded-sm shadow-[0_0_20px_rgba(220,38,38,0.15)]">
+                  <div className="flex items-center justify-between text-xs font-black tracking-widest text-red-500 mb-1">
+                    <span>HEALTH</span>
+                    <span>{Math.ceil(health)}%</span>
+                  </div>
+                  <div className="w-52 h-3 bg-zinc-900/80 border border-zinc-700 overflow-hidden">
+                    <div
+                      className={`h-full transition-all duration-200 ${health < 25 ? 'bg-red-600 animate-pulse' : 'bg-gradient-to-r from-red-700 to-red-500'}`}
+                      style={{ width: `${Math.max(0, health)}%` }}
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* TOP RIGHT: WAVE / SCORE */}
+              <div className="pointer-events-none fixed top-5 right-5 z-40 text-right">
+                <div className="bg-black/60 border border-cyan-900/40 backdrop-blur-sm p-3 rounded-sm shadow-[0_0_20px_rgba(6,182,212,0.15)]">
+                  <div className="text-cyan-400 font-black text-2xl tracking-tighter leading-none">WAVE {wave}</div>
+                  <div className="text-zinc-400 text-xs font-bold tracking-widest mt-1">SCORE <span className="text-white">{score}</span></div>
+                </div>
+              </div>
+
+              {/* BOTTOM LEFT: WEAPON + AMMO */}
+              <div className="pointer-events-none fixed bottom-5 left-5 z-40">
+                <div className="bg-black/60 border border-yellow-900/40 backdrop-blur-sm p-4 rounded-sm shadow-[0_0_20px_rgba(234,179,8,0.15)] min-w-[180px]">
+                  <div className="text-yellow-500 text-xs font-black tracking-widest mb-2">PRIMARY</div>
+                  <div className="flex items-end gap-3">
+                    <div className="text-5xl font-black text-white leading-none tabular-nums">{ammo}</div>
+                    <div className="text-sm text-zinc-500 font-bold mb-1">/ 30</div>
+                  </div>
+                  <div className="text-zinc-500 text-[10px] font-bold tracking-wider mt-2">R — RELOAD</div>
+                </div>
+              </div>
+
+              {/* BOTTOM RIGHT: CONTROLS */}
+              <div className="pointer-events-none fixed bottom-5 right-5 z-40">
+                <div className="bg-black/60 border border-zinc-800 backdrop-blur-sm px-4 py-3 rounded-sm text-[10px] text-zinc-400 font-mono leading-relaxed text-right">
+                  <div><span className="text-white font-bold">WASD</span> MOVE</div>
+                  <div><span className="text-white font-bold">MOUSE</span> AIM</div>
+                  <div><span className="text-white font-bold">CLICK</span> SHOOT</div>
+                  <div><span className="text-white font-bold">ESC</span> MENU</div>
                 </div>
               </div>
             </>
