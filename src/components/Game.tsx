@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState, Suspense, useMemo } from 'react';
 import { Canvas, useThree, useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
-import { useGLTF } from '@react-three/drei';
+import { useGLTF, Loader } from '@react-three/drei';
 import { useGame } from '@/store';
 import { Vector3, LootItem, BuildItem, Stalker } from '@/store';
 
@@ -243,7 +243,7 @@ function PlayerController() {
   );
 }
 
-function Scene() {
+function Scene({ started }: { started: boolean }) {
   const { time, isNight, nightNumber, player, gameOver, survived, resetGame } = useGame();
   const cycle = time % 60;
   const dayRatio = cycle / 60;
@@ -258,10 +258,10 @@ function Scene() {
       <directionalLight position={[20, 30, 10]} intensity={sunIntensity} castShadow color="#ffffff" />
 
       <World />
-      <PlayerController />
+      {started && <PlayerController />}
 
       {/* UI Overlay */}
-      <div className="pointer-events-none fixed inset-0 flex flex-col justify-between p-4 font-mono text-xs text-white">
+      {started && <div className="pointer-events-none fixed inset-0 flex flex-col justify-between p-4 font-mono text-xs text-white">
         <div className="flex justify-between">
           <div className="space-y-1 rounded bg-black/60 p-3">
             <div className="text-cyan-400 font-bold">DEAD ZONE</div>
@@ -304,17 +304,75 @@ function Scene() {
             </div>
           </div>
         )}
-      </div>
+      </div>}
     </>
   );
 }
 
 export default function Game() {
+  const [started, setStarted] = useState(false);
+
   return (
-    <div className="h-screen w-screen bg-black">
+    <div className="relative h-screen w-screen bg-black overflow-hidden">
+      {!started && (
+        <div className="pointer-events-auto absolute inset-0 z-20 flex flex-col items-center justify-center bg-gradient-to-br from-black via-zinc-950 to-red-950 text-white">
+          <div className="text-center space-y-6 p-8">
+            <h1 className="text-6xl md:text-8xl font-black tracking-tighter text-red-500 drop-shadow-[0_0_20px_rgba(220,38,38,0.5)]">
+              DEAD ZONE
+            </h1>
+            <p className="text-zinc-400 text-sm md:text-base max-w-md mx-auto font-mono">
+              Survive the night. Loot abandoned blocks. Build shelter. Don't let the Stalkers find you.
+            </p>
+            <div className="flex flex-col items-center gap-3 pt-4">
+              <button
+                onClick={() => setStarted(true)}
+                className="px-10 py-4 bg-red-600 hover:bg-red-500 text-black font-black text-xl rounded-sm tracking-widest transition-all hover:scale-105 shadow-[0_0_30px_rgba(220,38,38,0.4)]"
+              >
+                PLAY
+              </button>
+              <div className="text-zinc-500 text-[10px] font-mono">
+                WASD move · Mouse look · Click shoot · F flashlight
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
       <Canvas shadows camera={{ position: [0, 1.7, 0], fov: 75 }}>
-        <Scene />
+        <Scene started={started} />
       </Canvas>
+      <Loader
+        containerStyles={{
+          position: 'absolute',
+          inset: 0,
+          background: '#000',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 10,
+          color: '#fff',
+          fontFamily: 'monospace',
+        }}
+        innerStyles={{
+          width: '280px',
+          height: '6px',
+          background: '#222',
+          borderRadius: '0',
+        }}
+        barStyles={{
+          background: '#dc2626',
+        }}
+        dataStyles={{
+          color: '#aaa',
+          fontSize: '12px',
+          marginTop: '12px',
+          textAlign: 'center',
+        }}
+        initialState={(active) => active}
+        dataInterpolation={(p) => `LOADING SECTOR... ${p.toFixed(0)}%`}
+      />
     </div>
   );
 }
+
+useGLTF.preload(GLB_OUTPOST);
+useGLTF.preload(GLB_WAREHOUSE);
