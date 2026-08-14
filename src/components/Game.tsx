@@ -1,10 +1,14 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, Suspense, useMemo } from 'react';
 import { Canvas, useThree, useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
+import { useGLTF } from '@react-three/drei';
 import { useGame } from '@/store';
 import { Vector3, LootItem, BuildItem, Stalker } from '@/store';
+
+const GLB_OUTPOST = '/models/source/56qoshq0_toonout_upscayl_2x_ul_Telecommunication_building_with_f.glb';
+const GLB_WAREHOUSE = '/models/source/Copilot3D-e7609421-c809-4b38-bb78-0cd1ffa0f989.glb';
 
 const KEY: Record<string, boolean> = {};
 
@@ -60,11 +64,13 @@ function World() {
       <gridHelper args={[200, 100, '#333', '#222']} />
 
       {/* City block buildings */}
-      <Building position={[-15, 0, -15]} size={[10, 8, 10]} />
-      <Building position={[15, 0, -15]} size={[12, 12, 8]} />
-      <Building position={[-15, 0, 15]} size={[8, 6, 12]} />
-      <Building position={[15, 0, 15]} size={[10, 10, 10]} />
-      <Building position={[0, 0, -25]} size={[20, 5, 6]} />
+      <Suspense fallback={null}>
+        <ModelBuilding position={[-15, 0, -15]} glb={GLB_WAREHOUSE} scale={2} />
+        <ModelBuilding position={[15, 0, -15]} glb={GLB_OUTPOST} scale={0.04} />
+        <ModelBuilding position={[-15, 0, 15]} glb={GLB_WAREHOUSE} scale={2} />
+        <ModelBuilding position={[15, 0, 15]} glb={GLB_OUTPOST} scale={0.04} />
+        <ModelBuilding position={[0, 0, -25]} glb={GLB_WAREHOUSE} scale={2} />
+      </Suspense>
 
       {buildings.map((b) => (
         <BuildObject key={b.id} b={b} />
@@ -78,6 +84,16 @@ function World() {
         <StalkerObject key={s.id} s={s} />
       ))}
     </>
+  );
+}
+
+function ModelBuilding({ position, glb, scale = 1 }: { position: [number, number, number]; glb: string; scale?: number }) {
+  const { scene } = useGLTF(glb);
+  const cloned = useMemo(() => scene.clone(), [scene]);
+  return (
+    <group position={position}>
+      <primitive object={cloned} scale={scale} castShadow receiveShadow />
+    </group>
   );
 }
 
