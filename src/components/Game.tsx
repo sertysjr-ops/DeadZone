@@ -336,79 +336,42 @@ function Scene({ started }: { started: boolean }) {
 
 export default function Game() {
   const [started, setStarted] = useState(false);
-  const [mounted, setMounted] = useState(false);
+  const [count, setCount] = useState(0);
 
   useEffect(() => {
-    setMounted(true);
-  }, []);
-
-  const handlePlay = () => {
-    setStarted(true);
-    setTimeout(() => {
-      document.body.requestPointerLock?.().catch(() => {});
-    }, 300);
-  };
+    if (!started) return;
+    const id = setInterval(() => setCount((c) => c + 1), 1000);
+    return () => clearInterval(id);
+  }, [started]);
 
   return (
-    <div className="relative h-screen w-screen bg-black overflow-hidden">
-      {!started && (
-        <div className="pointer-events-auto absolute inset-0 z-50 flex flex-col items-center justify-center bg-gradient-to-br from-black via-zinc-950 to-red-950 text-white">
+    <div className="relative h-screen w-screen bg-black overflow-hidden text-white font-mono">
+      {!started ? (
+        <div className="absolute inset-0 z-50 flex flex-col items-center justify-center bg-gradient-to-br from-black via-zinc-950 to-red-950">
           <div className="text-center space-y-6 p-8">
             <h1 className="text-6xl md:text-8xl font-black tracking-tighter text-red-500 drop-shadow-[0_0_20px_rgba(220,38,38,0.5)]">
               DEAD ZONE
             </h1>
-            <p className="text-zinc-400 text-sm md:text-base max-w-md mx-auto font-mono">
-              Survive the night. Loot abandoned blocks. Build shelter. Don't let the Stalkers find you.
-            </p>
-            <div className="flex flex-col items-center gap-3 pt-4">
-              <button
-                onClick={handlePlay}
-                className="px-10 py-4 bg-red-600 hover:bg-red-500 text-black font-black text-xl rounded-sm tracking-widest transition-all hover:scale-105 shadow-[0_0_30px_rgba(220,38,38,0.4)]"
-              >
-                PLAY
-              </button>
-              <div className="text-zinc-500 text-[10px] font-mono">
-                WASD move · Mouse look · Click shoot · F flashlight
-              </div>
-            </div>
+            <button
+              onClick={() => setStarted(true)}
+              className="px-10 py-4 bg-red-600 hover:bg-red-500 text-black font-black text-xl rounded-sm tracking-widest transition-all hover:scale-105 shadow-[0_0_30px_rgba(220,38,38,0.4)]"
+            >
+              PLAY
+            </button>
           </div>
         </div>
+      ) : (
+        <div className="absolute inset-0 z-50 flex flex-col items-center justify-center bg-green-800 text-white">
+          <div className="text-4xl font-bold mb-4">TERRAIN LOADED</div>
+          <div className="text-xl">tick: {count}</div>
+          <button
+            onClick={() => setStarted(false)}
+            className="mt-8 px-6 py-3 bg-red-600 hover:bg-red-500 text-black font-bold"
+          >
+            BACK
+          </button>
+        </div>
       )}
-      {mounted && (
-        <Canvas shadows camera={{ position: [0, 1.7, 0], fov: 75 }}>
-          {started && <Scene started={started} />}
-        </Canvas>
-      )}
-      <Loader
-        containerStyles={{
-          position: 'absolute',
-          inset: 0,
-          background: '#000',
-          display: started ? 'none' : 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          zIndex: 10,
-          color: '#fff',
-          fontFamily: 'monospace',
-        }}
-        innerStyles={{
-          width: '280px',
-          height: '6px',
-          background: '#222',
-          borderRadius: '0',
-        }}
-        barStyles={{
-          background: '#dc2626',
-        }}
-        dataStyles={{
-          color: '#aaa',
-          fontSize: '12px',
-          marginTop: '12px',
-          textAlign: 'center',
-        }}
-        initialState={(active) => active}
-        dataInterpolation={(p) => `LOADING SECTOR... ${p.toFixed(0)}%`}
-      />
     </div>
   );
 }
