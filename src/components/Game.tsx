@@ -53,16 +53,16 @@ function World() {
 
   return (
     <>
-      <color attach="background" args={['#050508']} />
-      <fog attach="fog" args={['#050508', 10, 50]} />
-      <ambientLight intensity={0.05} />
+      <color attach="background" args={['#87ceeb']} />
+      <ambientLight intensity={1.2} />
+      <directionalLight position={[10, 20, 10]} intensity={1.5} castShadow color="#ffffff" />
 
-      <mesh ref={groundRef} rotation={[-Math.PI / 2, 0, 0]} receiveShadow onClick={handleClick}>
-        <planeGeometry args={[200, 200]} />
-        <meshStandardMaterial color="#1a1a1e" roughness={0.9} metalness={0.1} />
+      <mesh rotation={[-Math.PI / 2, 0, 0]} receiveShadow onClick={handleClick}>
+        <planeGeometry args={[500, 500]} />
+        <meshStandardMaterial color="#3a5f0b" roughness={0.9} />
       </mesh>
 
-      <gridHelper args={[200, 100, '#333', '#222']} />
+      <gridHelper args={[500, 100, '#ffffff', '#888888']} position={[0, 0.05, 0]} />
 
       {/* City block buildings — lightweight boxes instead of 60MB GLBs for instant start */}
       {USE_GLBS ? (
@@ -258,8 +258,8 @@ function Scene({ started }: { started: boolean }) {
   const { time, isNight, nightNumber, player, gameOver, survived, resetGame, messages, tick } = useGame();
   const cycle = time % 60;
   const dayRatio = cycle / 60;
-  const sky = isNight ? '#050508' : '#1a1a24';
-  const sunIntensity = isNight ? 0 : 0.3 + dayRatio * 0.4;
+  const sky = '#87ceeb';
+  const sunIntensity = 1.2;
   const recentMessages = messages.slice(-4);
 
   useEffect(() => {
@@ -279,9 +279,8 @@ function Scene({ started }: { started: boolean }) {
   return (
     <>
       <color attach="background" args={[sky]} />
-      <fog attach="fog" args={[sky, 8, 60]} />
-      <ambientLight intensity={isNight ? 0.05 : 0.4} />
-      <directionalLight position={[20, 30, 10]} intensity={sunIntensity} castShadow color="#ffffff" />
+      <ambientLight intensity={1.2} />
+      <directionalLight position={[10, 20, 10]} intensity={sunIntensity} castShadow color="#ffffff" />
 
       <World />
       {started && <PlayerController />}
