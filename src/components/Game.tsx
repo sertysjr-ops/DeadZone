@@ -1,0 +1,304 @@
+'use client';
+
+import { useEffect, useRef, useState } from 'react';
+import { Canvas, useThree, useFrame } from '@react-three/fiber';
+import * as THREE from 'three';
+import { useGame } from '@/store';
+import { Vector3, LootItem, BuildItem, Stalker } from '@/store';
+
+const KEY: Record<string, boolean> = {};
+
+function dist(a: Vector3, b: Vector3) {
+  const dx = a[0] - b[0];
+  const dz = a[2] - b[2];
+  return Math.sqrt(dx * dx + dz * dz);
+}
+
+function World() {
+  const { buildings, loot, stalkers, selectedBuild, placeBuilding, setSelectedBuild, pickupLoot, player } = useGame();
+  const groundRef = useRef<THREE.Mesh>(null);
+  const { camera, raycaster, pointer } = useThree();
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      KEY[e.key.toLowerCase()] = e.type === 'keydown';
+      if (e.key === '1') setSelectedBuild('wall');
+      if (e.key === '2') setSelectedBuild('storage');
+      if (e.key === '3') setSelectedBuild('campfire');
+      if (e.key === 'Escape') setSelectedBuild(null);
+    };
+    window.addEventListener('keydown', onKey);
+    window.addEventListener('keyup', onKey);
+    return () => {
+      window.removeEventListener('keydown', onKey);
+      window.removeEventListener('keyup', onKey);
+    };
+  }, [setSelectedBuild]);
+
+  const handleClick = (e: any) => {
+    if (!selectedBuild) return;
+    e.stopPropagation();
+    raycaster.setFromCamera(pointer, camera);
+    const intersects = raycaster.intersectObject(groundRef.current!);
+    if (intersects.length > 0) {
+      const p = intersects[0].point;
+      placeBuilding(selectedBuild, [p.x, 0, p.z], 0);
+    }
+  };
+
+  return (
+    <>
+      <color attach="background" args={['#050508']} />
+      <fog attach="fog" args={['#050508', 10, 50]} />
+      <ambientLight intensity={0.05} />
+
+      <mesh ref={groundRef} rotation={[-Math.PI / 2, 0, 0]} receiveShadow onClick={handleClick}>
+        <planeGeometry args={[200, 200]} />
+        <meshStandardMaterial color="#1a1a1e" roughness={0.9} metalness={0.1} />
+      </mesh>
+
+      <gridHelper args={[200, 100, '#333', '#222']} />
+
+      {/* City block buildings */}
+      <Building position={[-15, 0, -15]} size={[10, 8, 10]} />
+      <Building position={[15, 0, -15]} size={[12, 12, 8]} />
+      <Building position={[-15, 0, 15]} size={[8, 6, 12]} />
+      <Building position={[15, 0, 15]} size={[10, 10, 10]} />
+      <Building position={[0, 0, -25]} size={[20, 5, 6]} />
+
+      {buildings.map((b) => (
+        <BuildObject key={b.id} b={b} />
+      ))}
+
+      {loot.map((l) => (
+        <LootObject key={l.id} item={l} onPickup={() => pickupLoot(l.id)} player={player.position} />
+      ))}
+
+      {stalkers.map((s) => (
+        <StalkerObject key={s.id} s={s} />
+      ))}
+    </>
+  );
+}
+
+function Building({ position, size }: { position: [number, number, number]; size: [number, number, number] }) {
+  return (
+    <mesh position={[position[0], size[1] / 2, position[2]]} castShadow receiveShadow>
+      <boxGeometry args={size} />
+      <meshStandardMaterial color="#2a2a35" roughness={0.8} />
+    </mesh>
+  );
+}
+
+function BuildObject({ b }: { b: BuildItem }) {
+  const color = b.type === 'wall' ? '#4a4a55' : b.type === 'storage' ? '#5a4a35' : '#ff6b35';
+  const size = b.type === 'wall' ? [3, 2.5, 0.5] : b.type === 'storage' ? [2, 1.5, 1.5] : [1.5, 0.5, 1.5];
+  return (
+    <mesh position={[b.position[0], size[1] / 2, b.position[2]]} castShadow receiveShadow>
+      <boxGeometry args={size as [number, number, number]} />
+      <meshStandardMaterial color={color} roughness={0.7} />
+    </mesh>
+  );
+}
+
+function LootObject({ item, onPickup, player }: { item: LootItem; onPickup: () => void; player: Vector3 }) {
+  const color =
+    item.type === 'food' ? '#22c55e' : item.type === 'ammo' ? '#facc15' : item.type === 'medicine' ? '#ef4444' : item.type === 'keycard' ? '#a855f7' : '#3b82f6';
+  const d = dist(item.position, player);
+  return (
+    <group position={item.position}>
+      <mesh
+        onClick={(e) => {
+          e.stopPropagation();
+          if (d < 3) onPickup();
+        }}
+      >
+        <boxGeometry args={[0.4, 0.4, 0.4]} />
+        <meshStandardMaterial color={color} emissive={color} emissiveIntensity={0.3} />
+      </mesh>
+      {d < 3 && (
+        <mesh position={[0, 0.6, 0]}>
+          <planeGeometry args={[1.2, 0.3]} />
+          <meshBasicMaterial color="black" transparent opacity={0.7} />
+        </mesh>
+      )}
+    </group>
+  );
+}
+
+function StalkerObject({ s }: { s: Stalker }) {
+  return (
+    <group position={s.position}>
+      <mesh castShadow>
+        <capsuleGeometry args={[0.4, 1.2, 4, 8]} />
+        <meshStandardMaterial color={s.visible ? '#ff0044' : '#1a0000'} emissive={s.visible ? '#330000' : '#000000'} />
+      </mesh>
+      {s.state === 'attack' && (
+        <pointLight color="#ff0044" intensity={2} distance={5} />
+      )}
+    </group>
+  );
+}
+
+function PlayerController() {
+  const { camera } = useThree();
+  const { setPlayerPosition, setPlayerRotation, toggleFlashlight, player, shoot } = useGame();
+  const yawRef = useRef(0);
+  const pitchRef = useRef(0);
+  const velocity = useRef(new THREE.Vector3());
+  const locked = useRef(false);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      KEY[e.key.toLowerCase()] = e.type === 'keydown';
+      if (e.type === 'keydown' && e.key === 'f') toggleFlashlight();
+      if (e.type === 'keydown' && e.key === ' ') shoot();
+    };
+    const onMouseMove = (e: MouseEvent) => {
+      if (!locked.current) return;
+      yawRef.current -= e.movementX * 0.002;
+      pitchRef.current -= e.movementY * 0.002;
+      pitchRef.current = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, pitchRef.current));
+    };
+    const onLock = () => {
+      locked.current = document.pointerLockElement === document.body;
+    };
+    const onClick = () => {
+      if (!locked.current) document.body.requestPointerLock();
+      else shoot();
+    };
+
+    window.addEventListener('keydown', onKey);
+    window.addEventListener('keyup', onKey);
+    window.addEventListener('mousemove', onMouseMove);
+    document.addEventListener('pointerlockchange', onLock);
+    window.addEventListener('click', onClick);
+
+    return () => {
+      window.removeEventListener('keydown', onKey);
+      window.removeEventListener('keyup', onKey);
+      window.removeEventListener('mousemove', onMouseMove);
+      document.removeEventListener('pointerlockchange', onLock);
+      window.removeEventListener('click', onClick);
+    };
+  }, [toggleFlashlight, shoot, setPlayerPosition, setPlayerRotation]);
+
+  useFrame((_, delta) => {
+    const speed = 4;
+    const dir = new THREE.Vector3();
+    const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
+    forward.y = 0;
+    forward.normalize();
+    const right = new THREE.Vector3(1, 0, 0).applyQuaternion(camera.quaternion);
+    right.y = 0;
+    right.normalize();
+
+    if (KEY['w']) dir.add(forward);
+    if (KEY['s']) dir.sub(forward);
+    if (KEY['a']) dir.sub(right);
+    if (KEY['d']) dir.add(right);
+
+    if (dir.length() > 0) dir.normalize().multiplyScalar(speed * delta);
+
+    const newX = player.position[0] + dir.x;
+    const newZ = player.position[2] + dir.z;
+    setPlayerPosition([newX, 1.7, newZ]);
+    setPlayerRotation(yawRef.current);
+
+    camera.position.set(newX, 1.7, newZ);
+    camera.rotation.order = 'YXZ';
+    camera.rotation.y = yawRef.current;
+    camera.rotation.x = pitchRef.current;
+  });
+
+  return (
+    <>
+      <spotLight
+        position={camera.position}
+        rotation={camera.rotation}
+        angle={0.5}
+        penumbra={0.3}
+        intensity={player.flashlight ? 80 : 0}
+        distance={25}
+        castShadow
+        color="#ffaa77"
+      />
+    </>
+  );
+}
+
+function Scene() {
+  const { time, isNight, nightNumber, player, gameOver, survived, resetGame } = useGame();
+  const cycle = time % 60;
+  const dayRatio = cycle / 60;
+  const sky = isNight ? '#050508' : '#1a1a24';
+  const sunIntensity = isNight ? 0 : 0.3 + dayRatio * 0.4;
+
+  return (
+    <>
+      <color attach="background" args={[sky]} />
+      <fog attach="fog" args={[sky, 8, 60]} />
+      <ambientLight intensity={isNight ? 0.05 : 0.4} />
+      <directionalLight position={[20, 30, 10]} intensity={sunIntensity} castShadow color="#ffffff" />
+
+      <World />
+      <PlayerController />
+
+      {/* UI Overlay */}
+      <div className="pointer-events-none fixed inset-0 flex flex-col justify-between p-4 font-mono text-xs text-white">
+        <div className="flex justify-between">
+          <div className="space-y-1 rounded bg-black/60 p-3">
+            <div className="text-cyan-400 font-bold">DEAD ZONE</div>
+            <div>Night {nightNumber} — {isNight ? '🌙 NIGHT' : '☀️ DAY'}</div>
+            <div>Time: {cycle.toFixed(0)}s</div>
+            <div>Health: {player.health.toFixed(0)}</div>
+            <div>Hunger: {player.hunger.toFixed(0)}</div>
+          </div>
+          <div className="space-y-1 rounded bg-black/60 p-3 text-right">
+            <div>Ammo: {player.ammo}</div>
+            <div>Food: {player.food}</div>
+            <div>Medicine: {player.medicine}</div>
+            <div>Scrap: {player.scrap}</div>
+            <div>{player.hasKeycard ? '🔑 KEYCARD' : ''}</div>
+          </div>
+        </div>
+
+        <div className="flex items-end justify-between">
+          <div className="rounded bg-black/60 p-3">
+            <div className="text-gray-400 mb-1">Controls</div>
+            <div>WASD move | Mouse look | Click shoot</div>
+            <div>F flashlight | 1 Wall | 2 Storage | 3 Campfire | ESC cancel</div>
+          </div>
+          <div className="max-w-xs rounded bg-black/60 p-3 text-[10px] text-gray-300">
+            {useGame.getState().messages.slice(-4).map((m, i) => (
+              <div key={i} className={m.includes('died') ? 'text-red-400' : m.includes('KEYCARD') ? 'text-purple-400' : ''}>
+                {m}
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {(gameOver || survived) && (
+          <div className="pointer-events-auto absolute inset-0 flex items-center justify-center bg-black/80">
+            <div className="rounded bg-black p-8 text-center border border-white/10">
+              <div className="mb-4 text-2xl font-bold text-red-500">{gameOver ? 'YOU DIED' : 'SURVIVED'}</div>
+              <button onClick={resetGame} className="rounded bg-cyan-500 px-6 py-2 text-black font-bold hover:bg-cyan-400">
+                Restart
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    </>
+  );
+}
+
+export default function Game() {
+  return (
+    <div className="h-screen w-screen bg-black">
+      <Canvas shadows camera={{ position: [0, 1.7, 0], fov: 75 }}>
+        <Scene />
+      </Canvas>
+    </div>
+  );
+}
