@@ -197,6 +197,74 @@ function formatTime(ts: number) {
   return d.toLocaleString();
 }
 
+function ZombieHand({ delay }: { delay: number }) {
+  const hand = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const el = hand.current;
+    if (!el) return;
+    let raf = 0;
+    let start: number | null = null;
+    const duration = 2500;
+
+    const animate = (t: number) => {
+      if (start === null) start = t;
+      const progress = ((t - start + delay) % duration) / duration;
+      const y = Math.max(-120, -120 + progress * 160 + Math.sin(progress * Math.PI * 6) * 10);
+      const rot = Math.sin(progress * Math.PI * 4) * 8;
+      el.style.transform = `translateY(${y}%) rotate(${rot}deg)`;
+      raf = requestAnimationFrame(animate);
+    };
+    raf = requestAnimationFrame(animate);
+    return () => cancelAnimationFrame(raf);
+  }, [delay]);
+
+  return (
+    <div
+      ref={hand}
+      className="absolute w-16 h-40 opacity-70"
+      style={{
+        bottom: '-40px',
+        left: `${10 + Math.random() * 80}%`,
+        filter: 'blur(0.5px) drop-shadow(0 0 8px rgba(0,0,0,0.8))',
+      }}
+    >
+      <svg viewBox="0 0 100 220" className="w-full h-full fill-zinc-800 stroke-black stroke-2">
+        <path d="M50 210 C 20 200, 10 160, 15 130 C 5 120, 5 90, 20 85 C 10 70, 15 40, 35 35 C 30 20, 40 5, 55 10 C 60 25, 75 30, 80 50 C 95 55, 100 85, 85 95 C 95 110, 90 140, 75 150 C 80 180, 70 205, 50 210 Z" />
+        <ellipse cx="25" cy="85" rx="8" ry="18" />
+        <ellipse cx="30" cy="55" rx="7" ry="16" />
+        <ellipse cx="50" cy="40" rx="7" ry="16" />
+        <ellipse cx="72" cy="58" rx="7" ry="16" />
+        <ellipse cx="78" cy="90" rx="7" ry="16" />
+      </svg>
+    </div>
+  );
+}
+
+function MenuBackgroundHands() {
+  const [hands, setHands] = useState<{ id: number; delay: number; left: number }[]>([]);
+
+  useEffect(() => {
+    const h = Array.from({ length: 12 }).map((_, i) => ({
+      id: i,
+      delay: i * 350,
+      left: 5 + (i * 90) / 11 + Math.random() * 6,
+    }));
+    setHands(h);
+  }, []);
+
+  return (
+    <div className="absolute inset-0 overflow-hidden pointer-events-none z-0">
+      <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/40 to-transparent z-10" />
+      {hands.map((h) => (
+        <div key={h.id} className="absolute bottom-0" style={{ left: `${h.left}%`, transform: 'translateX(-50%)' }}>
+          <ZombieHand delay={h.delay} />
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export default function Game() {
   const [started, setStarted] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -271,8 +339,9 @@ export default function Game() {
     <div className="relative h-screen w-screen bg-black overflow-hidden text-white font-mono select-none">
       {!started ? (
         <div className="absolute inset-0 z-50 flex flex-col items-center justify-center bg-gradient-to-br from-black via-zinc-950 to-red-950">
-          <div className="text-center space-y-6 p-8">
-            <h1 className="text-6xl md:text-8xl font-black tracking-tighter text-red-500 drop-shadow-[0_0_20px_rgba(220,38,38,0.5)]">
+          <MenuBackgroundHands />
+          <div className="relative z-20 text-center space-y-6 p-8">
+            <h1 className="text-6xl md:text-8xl font-black tracking-tighter text-red-500 drop-shadow-[0_0_30px_rgba(220,38,38,0.8)]">
               DEAD ZONE
             </h1>
             <div className="flex flex-col items-center gap-3 pt-4">
