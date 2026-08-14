@@ -9,6 +9,7 @@ import { Vector3, LootItem, BuildItem, Stalker } from '@/store';
 
 const GLB_OUTPOST = '/models/source/56qoshq0_toonout_upscayl_2x_ul_Telecommunication_building_with_f.glb';
 const GLB_WAREHOUSE = '/models/source/Copilot3D-e7609421-c809-4b38-bb78-0cd1ffa0f989.glb';
+const USE_GLBS = false; // disable 60MB models until streaming/lazy load is set up
 
 const KEY: Record<string, boolean> = {};
 
@@ -63,14 +64,24 @@ function World() {
 
       <gridHelper args={[200, 100, '#333', '#222']} />
 
-      {/* City block buildings */}
-      <Suspense fallback={null}>
-        <ModelBuilding position={[-15, 0, -15]} glb={GLB_WAREHOUSE} scale={2} />
-        <ModelBuilding position={[15, 0, -15]} glb={GLB_OUTPOST} scale={0.04} />
-        <ModelBuilding position={[-15, 0, 15]} glb={GLB_WAREHOUSE} scale={2} />
-        <ModelBuilding position={[15, 0, 15]} glb={GLB_OUTPOST} scale={0.04} />
-        <ModelBuilding position={[0, 0, -25]} glb={GLB_WAREHOUSE} scale={2} />
-      </Suspense>
+      {/* City block buildings — lightweight boxes instead of 60MB GLBs for instant start */}
+      {USE_GLBS ? (
+        <Suspense fallback={null}>
+          <ModelBuilding position={[-15, 0, -15]} glb={GLB_WAREHOUSE} scale={2} />
+          <ModelBuilding position={[15, 0, -15]} glb={GLB_OUTPOST} scale={0.04} />
+          <ModelBuilding position={[-15, 0, 15]} glb={GLB_WAREHOUSE} scale={2} />
+          <ModelBuilding position={[15, 0, 15]} glb={GLB_OUTPOST} scale={0.04} />
+          <ModelBuilding position={[0, 0, -25]} glb={GLB_WAREHOUSE} scale={2} />
+        </Suspense>
+      ) : (
+        <>
+          <Building position={[-15, 0, -15]} size={[8, 6, 8]} />
+          <Building position={[15, 0, -15]} size={[6, 10, 6]} />
+          <Building position={[-15, 0, 15]} size={[8, 5, 8]} />
+          <Building position={[15, 0, 15]} size={[6, 8, 6]} />
+          <Building position={[0, 0, -25]} size={[10, 5, 10]} />
+        </>
+      )}
 
       {buildings.map((b) => (
         <BuildObject key={b.id} b={b} />
@@ -244,11 +255,26 @@ function PlayerController() {
 }
 
 function Scene({ started }: { started: boolean }) {
-  const { time, isNight, nightNumber, player, gameOver, survived, resetGame } = useGame();
+  const { time, isNight, nightNumber, player, gameOver, survived, resetGame, messages, tick } = useGame();
   const cycle = time % 60;
   const dayRatio = cycle / 60;
   const sky = isNight ? '#050508' : '#1a1a24';
   const sunIntensity = isNight ? 0 : 0.3 + dayRatio * 0.4;
+  const recentMessages = messages.slice(-4);
+
+  useEffect(() => {
+    if (!started) return;
+    let raf = 0;
+    let last = performance.now();
+    const loop = (now: number) => {
+      const delta = Math.min((now - last) / 1000, 0.1);
+      last = now;
+      tick(delta);
+      raf = requestAnimationFrame(loop);
+    };
+    raf = requestAnimationFrame(loop);
+    return () => cancelAnimationFrame(raf);
+  }, [started, tick]);
 
   return (
     <>
@@ -286,7 +312,7 @@ function Scene({ started }: { started: boolean }) {
             <div>F flashlight | 1 Wall | 2 Storage | 3 Campfire | ESC cancel</div>
           </div>
           <div className="max-w-xs rounded bg-black/60 p-3 text-[10px] text-gray-300">
-            {useGame.getState().messages.slice(-4).map((m, i) => (
+            {recentMessages.map((m, i) => (
               <div key={i} className={m.includes('died') ? 'text-red-400' : m.includes('KEYCARD') ? 'text-purple-400' : ''}>
                 {m}
               </div>
@@ -311,11 +337,23 @@ function Scene({ started }: { started: boolean }) {
 
 export default function Game() {
   const [started, setStarted] = useState(false);
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  const handlePlay = () => {
+    setStarted(true);
+    setTimeout(() => {
+      document.body.requestPointerLock?.().catch(() => {});
+    }, 300);
+  };
 
   return (
     <div className="relative h-screen w-screen bg-black overflow-hidden">
       {!started && (
-        <div className="pointer-events-auto absolute inset-0 z-20 flex flex-col items-center justify-center bg-gradient-to-br from-black via-zinc-950 to-red-950 text-white">
+        <div className="pointer-events-auto absolute inset-0 z-50 flex flex-col items-center justify-center bg-gradient-to-br from-black via-zinc-950 to-red-950 text-white">
           <div className="text-center space-y-6 p-8">
             <h1 className="text-6xl md:text-8xl font-black tracking-tighter text-red-500 drop-shadow-[0_0_20px_rgba(220,38,38,0.5)]">
               DEAD ZONE
@@ -325,7 +363,7 @@ export default function Game() {
             </p>
             <div className="flex flex-col items-center gap-3 pt-4">
               <button
-                onClick={() => setStarted(true)}
+                onClick={handlePlay}
                 className="px-10 py-4 bg-red-600 hover:bg-red-500 text-black font-black text-xl rounded-sm tracking-widest transition-all hover:scale-105 shadow-[0_0_30px_rgba(220,38,38,0.4)]"
               >
                 PLAY
@@ -337,15 +375,17 @@ export default function Game() {
           </div>
         </div>
       )}
-      <Canvas shadows camera={{ position: [0, 1.7, 0], fov: 75 }}>
-        <Scene started={started} />
-      </Canvas>
+      {mounted && (
+        <Canvas shadows camera={{ position: [0, 1.7, 0], fov: 75 }}>
+          {started && <Scene started={started} />}
+        </Canvas>
+      )}
       <Loader
         containerStyles={{
           position: 'absolute',
           inset: 0,
           background: '#000',
-          display: 'flex',
+          display: started ? 'none' : 'flex',
           alignItems: 'center',
           justifyContent: 'center',
           zIndex: 10,
