@@ -31,18 +31,9 @@ interface Pickup {
   type: 'health' | 'ammo';
 }
 
-function HandWithGun() {
-  const group = useRef<THREE.Group>(null);
-
-  useFrame((state) => {
-    if (!group.current) return;
-    const t = state.clock.elapsedTime;
-    group.current.position.set(0.35, -0.38, -0.55);
-    group.current.rotation.set(-0.1 + Math.sin(t * 6) * 0.015, 0.25, 0);
-  });
-
+function HandWithGun({ recoil }: { recoil: number }) {
   return (
-    <group ref={group}>
+    <group position={[0.35, -0.38, -0.55]} rotation={[-0.1 - recoil, 0.25, 0]}>
       {/* arm */}
       <mesh position={[0, -0.12, -0.12]} rotation={[0.3, 0, 0]}>
         <boxGeometry args={[0.14, 0.35, 0.16]} />
@@ -105,10 +96,12 @@ function Player({
   savedPosition,
   savedRotation,
   onSave,
+  recoil,
 }: {
   savedPosition?: { x: number; y: number; z: number };
   savedRotation?: { yaw: number; pitch: number };
   onSave: (data: SaveData) => void;
+  recoil: number;
 }) {
   const { camera, scene } = useThree();
   const yaw = useRef(savedRotation?.yaw ?? 0);
@@ -208,13 +201,13 @@ function Player({
     <>
       <spotLight position={camera.position} rotation={camera.rotation} angle={0.6} penumbra={0.4} intensity={80} distance={35} color="#ffccaa" />
       <group position={camera.position} rotation={[camera.rotation.x, camera.rotation.y, 0]}>
-        <HandWithGun />
+        <HandWithGun recoil={recoil} />
       </group>
     </>
   );
 }
 
-function Scene({ savedData, onSave, onStats }: { savedData?: SaveData; onSave: (d: SaveData) => void; onStats: (h: number, a: number, s: number, w: number) => void }) {
+function Scene({ savedData, onSave, onStats, onHit, recoil }: { savedData?: SaveData; onSave: (d: SaveData) => void; onStats: (h: number, a: number, s: number, w: number) => void; onHit: (point: THREE.Vector3) => void; recoil: { current: number } }) {
   const { camera, scene } = useThree();
   const enemies = useRef<Enemy[]>([]);
   const pickups = useRef<Pickup[]>([]);
@@ -317,6 +310,7 @@ function Scene({ savedData, onSave, onStats }: { savedData?: SaveData; onSave: (
     if (now - lastShot.current < 180 || ammo.current <= 0 || gameOver.current) return;
     lastShot.current = now;
     ammo.current--;
+    recoil.current = 0.25;
 
     // muzzle flash
     if (muzzleFlash.current) {
@@ -327,9 +321,11 @@ function Scene({ savedData, onSave, onStats }: { savedData?: SaveData; onSave: (
       }, 50);
     }
 
-    const ray = new THREE.Raycaster(camera.position, new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion));
+    const direction = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
+    const ray = new THREE.Raycaster(camera.position, direction);
     let hit: Enemy | null = null;
     let bestDist = Infinity;
+    let hitPoint = new THREE.Vector3();
 
     for (const e of enemies.current) {
       if (e.dead) continue;
@@ -341,6 +337,7 @@ function Scene({ savedData, onSave, onStats }: { savedData?: SaveData; onSave: (
         if (d < bestDist) {
           bestDist = d;
           hit = e;
+          hitPoint.copy(target);
         }
       }
     }
@@ -352,7 +349,14 @@ function Scene({ savedData, onSave, onStats }: { savedData?: SaveData; onSave: (
         score.current += 10 + wave.current * 2;
         if (Math.random() > 0.7) spawnPickup(hit.mesh.position.x, hit.mesh.position.z);
       }
+    } else {
+      // hit the ground far away
+      const groundPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+      hitPoint = new THREE.Vector3();
+      ray.ray.intersectPlane(groundPlane, hitPoint);
     }
+
+    onHit(hitPoint);
   };
 
   useEffect(() => {
@@ -376,6 +380,7 @@ function Scene({ savedData, onSave, onStats }: { savedData?: SaveData; onSave: (
   }, []);
 
   useFrame(() => {
+    recoil.current = Math.max(0, recoil.current - 0.04);
     if (gameOver.current) return;
 
     // wave spawning
@@ -541,6 +546,16 @@ export default function Game() {
   const [wave, setWave] = useState(1);
   const [gameOver, setGameOver] = useState(false);
   const currentSave = useRef<SaveData | undefined>(undefined);
+  const recoilRef = useRef(0);
+  const [hitDots, setHitDots] = useState<{ id: number; x: number; y: number; z: number }[]>([]);
+
+  const onHit = (point: THREE.Vector3) => {
+    const id = Date.now() + Math.random();
+    setHitDots((prev) => [...prev, { id, x: point.x, y: point.y, z: point.z }]);
+    setTimeout(() => {
+      setHitDots((prev) => prev.filter((d) => d.id !== id));
+    }, 800);
+  };
 
   useEffect(() => {
     const raw = localStorage.getItem(SAVE_KEY);
@@ -714,14 +729,20 @@ export default function Game() {
 
           <Canvas shadows camera={{ position: [0, 1.7, 0], fov: 75 }}>
             <World />
-            <Player savedPosition={savedData?.playerPosition} savedRotation={savedData?.playerRotation} onSave={saveGame} />
+            <Player savedPosition={savedData?.playerPosition} savedRotation={savedData?.playerRotation} onSave={saveGame} recoil={recoilRef.current} />
             <Scene savedData={savedData} onSave={saveGame} onStats={(h, a, s, w) => {
               setHealth(h);
               setAmmo(a);
               setScore(s);
               setWave(w);
               if (h <= 0) setGameOver(true);
-            }} />
+            }} onHit={onHit} recoil={recoilRef} />
+            {hitDots.map((d) => (
+              <mesh key={d.id} position={[d.x, d.y + 0.02, d.z]}>
+                <sphereGeometry args={[0.08, 8, 8]} />
+                <meshBasicMaterial color="#ff0000" transparent opacity={0.8} />
+              </mesh>
+            ))}
           </Canvas>
         </>
       )}
