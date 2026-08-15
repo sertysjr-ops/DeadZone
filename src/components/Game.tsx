@@ -124,26 +124,36 @@ function createChest(x: number, z: number, rotation: number, scene: THREE.Scene)
 
 function HandWithGun({ recoil, walkBob }: { recoil: number; walkBob: number }) {
   return (
-    <group position={[0.35, -0.38 + walkBob * 0.06, -0.55]} rotation={[-0.1 - recoil, 0.25, walkBob * 0.05]}>
-      {/* arm */}
-      <mesh position={[0, -0.12, -0.12]} rotation={[0.3, 0, 0]}>
-        <boxGeometry args={[0.14, 0.35, 0.16]} />
-        <meshStandardMaterial color="#1f2937" />
+    <group position={[0.35, -0.38 + walkBob * 0.08, -0.6]} rotation={[-0.1 - recoil, 0.25, walkBob * 0.05]}>
+      {/* arm sleeve */}
+      <mesh position={[0, -0.14, -0.14]} rotation={[0.3, 0, 0]}>
+        <boxGeometry args={[0.13, 0.38, 0.18]} />
+        <meshStandardMaterial color="#111827" roughness={0.9} />
       </mesh>
       {/* hand */}
       <mesh position={[0, 0.02, 0.02]}>
         <boxGeometry args={[0.12, 0.14, 0.16]} />
-        <meshStandardMaterial color="#d1a982" />
+        <meshStandardMaterial color="#c69c7a" roughness={0.8} />
       </mesh>
       {/* gun grip */}
       <mesh position={[-0.05, -0.08, 0.08]} rotation={[0.4, 0, 0]}>
-        <boxGeometry args={[0.06, 0.18, 0.08]} />
-        <meshStandardMaterial color="#111" />
+        <boxGeometry args={[0.07, 0.2, 0.09]} />
+        <meshStandardMaterial color="#0a0a0a" roughness={0.5} metalness={0.3} />
       </mesh>
-      {/* gun barrel */}
+      {/* gun body */}
       <mesh position={[0, 0.02, 0.22]}>
-        <boxGeometry args={[0.07, 0.09, 0.42]} />
+        <boxGeometry args={[0.09, 0.11, 0.42]} />
+        <meshStandardMaterial color="#1f1f1f" roughness={0.4} metalness={0.5} />
+      </mesh>
+      {/* trigger guard */}
+      <mesh position={[-0.04, -0.05, 0.04]}>
+        <boxGeometry args={[0.02, 0.08, 0.08]} />
         <meshStandardMaterial color="#222" />
+      </mesh>
+      {/* muzzle */}
+      <mesh position={[0, 0.03, 0.46]}>
+        <cylinderGeometry args={[0.04, 0.04, 0.12, 12]} />
+        <meshStandardMaterial color="#000" roughness={0.3} metalness={0.8} />
       </mesh>
     </group>
   );
@@ -170,6 +180,8 @@ function Player({
   const ammo = useRef(30);
   const score = useRef(0);
   const wave = useRef(1);
+  const handRef = useRef<THREE.Group>(null);
+  const walkBob = useRef(0);
 
   useEffect(() => {
     if (savedPosition) {
@@ -219,9 +231,6 @@ function Player({
       window.removeEventListener('click', onClick);
     };
   }, []);
-
-  const walkBob = useRef(0);
-  (Player as any).walkBob = walkBob;
 
   useFrame((state) => {
     const speed = 5;
@@ -275,6 +284,12 @@ function Player({
     const t = state.clock.elapsedTime;
     walkBob.current = isMoving ? Math.sin(t * 10) : Math.sin(t * 1.5) * 0.15;
 
+    // attach hand to camera in world space so it doesn't lag behind
+    if (handRef.current) {
+      handRef.current.position.copy(camera.position);
+      handRef.current.rotation.set(camera.rotation.x, camera.rotation.y, 0);
+    }
+
     onSave({
       playerPosition: { x: camera.position.x, y: camera.position.y, z: camera.position.z },
       playerRotation: { yaw: yaw.current, pitch: pitch.current },
@@ -289,14 +304,14 @@ function Player({
   return (
     <>
       <spotLight position={camera.position} rotation={camera.rotation} angle={0.6} penumbra={0.4} intensity={80} distance={35} color="#ffccaa" />
-      <group position={camera.position} rotation={[camera.rotation.x, camera.rotation.y, 0]}>
+      <group ref={handRef}>
         <HandWithGun recoil={recoil} walkBob={walkBob.current} />
       </group>
     </>
   );
 }
 
-function Scene({ savedData, onSave, onStats, onHit, recoil, day }: { savedData?: SaveData; onSave: (d: SaveData) => void; onStats: (h: number, a: number, s: number, w: number) => void; onHit: (point: THREE.Vector3) => void; recoil: { current: number }; day: number }) {
+function Scene({ savedData, onSave, onStats, onHit, recoil, day, onInventory, inventory, onTask, flashlight, setFlashlight, battery, setBattery, onKill }: { savedData?: SaveData; onSave: (d: SaveData) => void; onStats: (h: number, a: number, s: number, w: number) => void; onHit: (point: THREE.Vector3) => void; recoil: { current: number }; day: number; onInventory: (fn: (i: { batteries: number; medkits: number }) => { batteries: number; medkits: number }) => void; inventory: { batteries: number; medkits: number }; onTask: (t: Partial<{ openChest: boolean; killZombies: boolean; findBattery: boolean }>) => void; flashlight: boolean; setFlashlight: (v: boolean) => void; battery: number; setBattery: (v: number | ((x: number) => number)) => void; onKill: () => void }) {
   const { camera, scene } = useThree();
   const enemies = useRef<Enemy[]>([]);
   const pickups = useRef<Pickup[]>([]);
@@ -312,6 +327,7 @@ function Scene({ savedData, onSave, onStats, onHit, recoil, day }: { savedData?:
   const lastShot = useRef(0);
   const muzzleFlash = useRef<THREE.PointLight | null>(null);
   const [prompt, setPrompt] = useState<string | null>(null);
+  const flashlightRef = useRef<THREE.SpotLight | null>(null);
 
   // day scaling: harder each day, spawn more
   const dayRef = useRef(day);
@@ -341,13 +357,23 @@ function Scene({ savedData, onSave, onStats, onHit, recoil, day }: { savedData?:
     }
   }, [savedData]);
 
-  // muzzle flash light
+  // muzzle flash light + flashlight
   useEffect(() => {
     const light = new THREE.PointLight('#ffaa55', 0, 8);
     scene.add(light);
     muzzleFlash.current = light;
+
+    const flash = new THREE.SpotLight('#ffffff', 0, 45, 0.6, 0.4, 1);
+    flash.position.set(0, 0, 0);
+    flash.target.position.set(0, 0, -1);
+    scene.add(flash);
+    scene.add(flash.target);
+    flashlightRef.current = flash;
+
     return () => {
       scene.remove(light);
+      scene.remove(flash);
+      scene.remove(flash.target);
     };
   }, [scene]);
 
@@ -457,6 +483,7 @@ function Scene({ savedData, onSave, onStats, onHit, recoil, day }: { savedData?:
       if (hit.health <= 0) {
         hit.dead = true;
         score.current += 10 + wave.current * 2;
+        onKill();
         if (Math.random() > 0.7) spawnPickup(hit.mesh.position.x, hit.mesh.position.z);
       }
     } else {
@@ -484,7 +511,32 @@ function Scene({ savedData, onSave, onStats, onHit, recoil, day }: { savedData?:
       if (e.key.toLowerCase() === 'r' && !gameOver.current) {
         ammo.current = 30;
       }
+      if (e.key.toLowerCase() === 't' && !gameOver.current) {
+        setFlashlight(!flashlight);
+      }
       if (e.key.toLowerCase() === 'e' && !gameOver.current) {
+        // prioritize chest over door
+        let nearestChest: Chest | null = null;
+        let bestChest = Infinity;
+        for (const c of chests.current) {
+          const dx = camera.position.x - c.x;
+          const dz = camera.position.z - c.z;
+          const dist = Math.sqrt(dx * dx + dz * dz);
+          if (dist < 2.5 && dist < bestChest) {
+            bestChest = dist;
+            nearestChest = c;
+          }
+        }
+        if (nearestChest) {
+          nearestChest.open = !nearestChest.open;
+          if (nearestChest.open && !nearestChest.looted) {
+            nearestChest.looted = true;
+            onInventory((i) => ({ ...i, batteries: i.batteries + 1 }));
+            onTask({ openChest: true, findBattery: true });
+          }
+          return;
+        }
+        // door
         let nearest: Door | null = null;
         let best = Infinity;
         for (const d of doors.current) {
@@ -498,28 +550,6 @@ function Scene({ savedData, onSave, onStats, onHit, recoil, day }: { savedData?:
         }
         if (nearest) {
           nearest.open = !nearest.open;
-        }
-      }
-      if (e.key.toLowerCase() === 'f' && !gameOver.current) {
-        let nearest: Chest | null = null;
-        let best = Infinity;
-        for (const c of chests.current) {
-          const dx = camera.position.x - c.x;
-          const dz = camera.position.z - c.z;
-          const dist = Math.sqrt(dx * dx + dz * dz);
-          if (dist < 2.5 && dist < best) {
-            best = dist;
-            nearest = c;
-          }
-        }
-        if (nearest) {
-          nearest.open = !nearest.open;
-          if (nearest.open && !nearest.looted) {
-            nearest.looted = true;
-            const type = Math.random() > 0.5 ? 'health' : 'ammo';
-            if (type === 'health') health.current = Math.min(100, health.current + 30);
-            else ammo.current = Math.min(60, ammo.current + 15);
-          }
         }
       }
     };
@@ -595,16 +625,32 @@ function Scene({ savedData, onSave, onStats, onHit, recoil, day }: { savedData?:
       const dz = camera.position.z - d.z;
       if (Math.sqrt(dx * dx + dz * dz) < 3) nearDoor = true;
     }
-    let nearChest = false;
+    let nearChest: Chest | null = null;
     for (const c of chests.current) {
       const dx = camera.position.x - c.x;
       const dz = camera.position.z - c.z;
-      if (Math.sqrt(dx * dx + dz * dz) < 2.5) nearChest = true;
+      const dist = Math.sqrt(dx * dx + dz * dz);
+      if (dist < 2.5) nearChest = c;
     }
-    if (nearDoor && nearChest) setPrompt('E — DOOR  ·  F — CHEST');
+    if (nearChest) setPrompt(nearChest.looted ? 'E — CHEST (EMPTY)' : 'E — OPEN CHEST');
     else if (nearDoor) setPrompt('E — OPEN DOOR');
-    else if (nearChest) setPrompt('F — OPEN CHEST');
     else setPrompt(null);
+
+    // flashlight
+    if (flashlightRef.current) {
+      const dir = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
+      flashlightRef.current.position.copy(camera.position).add(new THREE.Vector3(0.3, -0.2, 0));
+      flashlightRef.current.target.position.copy(camera.position).add(dir.multiplyScalar(10));
+      flashlightRef.current.target.updateMatrixWorld();
+      flashlightRef.current.intensity = flashlight ? 150 : 0;
+    }
+
+    if (flashlight) {
+      setBattery((b) => Math.max(0, b - 0.03));
+    }
+    if (battery <= 0 && flashlight) {
+      setFlashlight(false);
+    }
 
     if (health.current <= 0) {
       health.current = 0;
@@ -734,6 +780,11 @@ export default function Game() {
   const [day, setDay] = useState(1);
   const [gameOver, setGameOver] = useState(false);
   const [collisionBoxes, setCollisionBoxes] = useState<THREE.Box3[]>([]);
+  const [inventory, setInventory] = useState<{ batteries: number; medkits: number }>({ batteries: 0, medkits: 0 });
+  const [flashlight, setFlashlight] = useState(false);
+  const [battery, setBattery] = useState(100);
+  const [tasks, setTasks] = useState({ openChest: false, killZombies: false, findBattery: false });
+  const [kills, setKills] = useState(0);
   const currentSave = useRef<SaveData | undefined>(undefined);
   const recoilRef = useRef(0);
   const [hitDots, setHitDots] = useState<{ id: number; x: number; y: number; z: number }[]>([]);
@@ -937,48 +988,82 @@ export default function Game() {
                 </div>
               </div>
 
-              {/* TOP LEFT: HP + STAMINA */}
+              {/* TOP LEFT: HP */}
               <div className="pointer-events-none fixed top-5 left-5 z-40 flex flex-col gap-2">
-                <div className="bg-black/60 border border-red-900/40 backdrop-blur-sm p-3 rounded-sm shadow-[0_0_20px_rgba(220,38,38,0.15)]">
-                  <div className="flex items-center justify-between text-xs font-black tracking-widest text-red-500 mb-1">
+                <div className="bg-black/70 border-l-4 border-red-600 backdrop-blur-sm p-3 min-w-[200px]">
+                  <div className="flex items-center justify-between text-[10px] font-black tracking-[0.2em] text-white mb-1">
                     <span>HEALTH</span>
                     <span>{Math.ceil(health)}%</span>
                   </div>
-                  <div className="w-52 h-3 bg-zinc-900/80 border border-zinc-700 overflow-hidden">
+                  <div className="w-full h-2 bg-zinc-900/80 overflow-hidden">
                     <div
-                      className={`h-full transition-all duration-200 ${health < 25 ? 'bg-red-600 animate-pulse' : 'bg-gradient-to-r from-red-700 to-red-500'}`}
+                      className={`h-full transition-all duration-200 ${health < 25 ? 'bg-red-500 animate-pulse' : 'bg-gradient-to-r from-red-700 to-red-500'}`}
                       style={{ width: `${Math.max(0, health)}%` }}
                     />
                   </div>
                 </div>
+                {/* FLASHLIGHT */}
+                <div className="bg-black/70 border-l-4 border-yellow-600 backdrop-blur-sm p-3">
+                  <div className="flex items-center justify-between text-[10px] font-black tracking-[0.2em] text-white mb-1">
+                    <span>FLASHLIGHT</span>
+                    <span className={battery < 20 ? 'text-red-500' : 'text-yellow-400'}>{Math.ceil(battery)}%</span>
+                  </div>
+                  <div className="w-full h-1 bg-zinc-900/80 overflow-hidden">
+                    <div className={`h-full transition-all duration-200 ${battery < 20 ? 'bg-red-500' : 'bg-yellow-400'}`} style={{ width: `${Math.max(0, battery)}%` }} />
+                  </div>
+                  <div className="text-white/60 text-[9px] mt-1 tracking-widest">T TOGGLE</div>
+                </div>
               </div>
 
-              {/* TOP RIGHT: WAVE / SCORE */}
-              <div className="pointer-events-none fixed top-5 right-5 z-40 text-right">
-                <div className="bg-black/60 border border-cyan-900/40 backdrop-blur-sm p-3 rounded-sm shadow-[0_0_20px_rgba(6,182,212,0.15)]">
+              {/* TOP RIGHT: DAY / SCORE / INVENTORY */}
+              <div className="pointer-events-none fixed top-5 right-5 z-40 text-right space-y-2">
+                <div className="bg-black/70 border-r-4 border-cyan-600 backdrop-blur-sm p-3 min-w-[140px]">
                   <div className="text-cyan-400 font-black text-2xl tracking-tighter leading-none">DAY {day}</div>
-                  <div className="text-zinc-400 text-xs font-bold tracking-widest mt-1">SCORE <span className="text-white">{score}</span></div>
+                  <div className="text-zinc-300 text-xs font-bold tracking-widest mt-1">SCORE {score}</div>
+                </div>
+                <div className="bg-black/70 border-r-4 border-zinc-600 backdrop-blur-sm p-3">
+                  <div className="text-[10px] font-black tracking-[0.2em] text-white mb-1">INVENTORY</div>
+                  <div className="text-white text-sm font-bold tabular-nums">
+                    <span className="text-yellow-400">BATT</span> {inventory.batteries}
+                  </div>
+                  <div className="text-white text-sm font-bold tabular-nums">
+                    <span className="text-green-400">MED</span> {inventory.medkits}
+                  </div>
+                </div>
+              </div>
+
+              {/* TASKS */}
+              <div className="pointer-events-none fixed top-1/2 right-5 -translate-y-1/2 z-40">
+                <div className="bg-black/80 border border-white/10 backdrop-blur-sm p-4 max-w-[240px]">
+                  <div className="text-white text-[10px] font-black tracking-[0.2em] mb-3 border-b border-white/10 pb-2">ACTIVE TASKS</div>
+                  <div className="space-y-2">
+                    <div className={`text-sm font-bold tracking-wide ${tasks.openChest ? 'text-white/40 line-through' : 'text-white'}`}>□ OPEN A CHEST</div>
+                    <div className={`text-sm font-bold tracking-wide ${tasks.killZombies ? 'text-white/40 line-through' : 'text-white'}`}>□ KILL 5 ZOMBIES</div>
+                    <div className={`text-sm font-bold tracking-wide ${tasks.findBattery ? 'text-white/40 line-through' : 'text-white'}`}>□ FIND A BATTERY</div>
+                  </div>
                 </div>
               </div>
 
               {/* BOTTOM LEFT: WEAPON + AMMO */}
               <div className="pointer-events-none fixed bottom-5 left-5 z-40">
-                <div className="bg-black/60 border border-yellow-900/40 backdrop-blur-sm p-4 rounded-sm shadow-[0_0_20px_rgba(234,179,8,0.15)] min-w-[180px]">
-                  <div className="text-yellow-500 text-xs font-black tracking-widest mb-2">PRIMARY</div>
+                <div className="bg-black/70 border-l-4 border-yellow-500 backdrop-blur-sm p-4 min-w-[180px]">
+                  <div className="text-yellow-500 text-[10px] font-black tracking-[0.2em] mb-2">PRIMARY</div>
                   <div className="flex items-end gap-3">
                     <div className="text-5xl font-black text-white leading-none tabular-nums">{ammo}</div>
-                    <div className="text-sm text-zinc-500 font-bold mb-1">/ 30</div>
+                    <div className="text-sm text-zinc-300 font-bold mb-1">/ 30</div>
                   </div>
-                  <div className="text-zinc-500 text-[10px] font-bold tracking-wider mt-2">R — RELOAD</div>
+                  <div className="text-white/60 text-[9px] font-bold tracking-wider mt-2">R — RELOAD</div>
                 </div>
               </div>
 
               {/* BOTTOM RIGHT: CONTROLS */}
               <div className="pointer-events-none fixed bottom-5 right-5 z-40">
-                <div className="bg-black/60 border border-zinc-800 backdrop-blur-sm px-4 py-3 rounded-sm text-[10px] text-zinc-400 font-mono leading-relaxed text-right">
+                <div className="bg-black/70 border border-white/10 backdrop-blur-sm px-4 py-3 text-[10px] text-zinc-300 font-mono leading-relaxed text-right">
                   <div><span className="text-white font-bold">WASD</span> MOVE</div>
                   <div><span className="text-white font-bold">MOUSE</span> AIM</div>
                   <div><span className="text-white font-bold">CLICK</span> SHOOT</div>
+                  <div><span className="text-white font-bold">E</span> INTERACT</div>
+                  <div><span className="text-white font-bold">T</span> FLASHLIGHT</div>
                   <div><span className="text-white font-bold">ESC</span> MENU</div>
                 </div>
               </div>
@@ -997,7 +1082,11 @@ export default function Game() {
               setScore(s);
               setDay(w);
               if (h <= 0) setGameOver(true);
-            }} onHit={onHit} recoil={recoilRef} day={day} />
+            }} onHit={onHit} recoil={recoilRef} day={day} onInventory={(fn) => setInventory(fn)} inventory={inventory} onTask={(t) => setTasks((prev) => ({ ...prev, ...t }))} flashlight={flashlight} setFlashlight={setFlashlight} battery={battery} setBattery={setBattery} onKill={() => setKills((k) => {
+              const next = k + 1;
+              if (next >= 5) setTasks((prev) => ({ ...prev, killZombies: true }));
+              return next;
+            })} />
             {hitDots.map((d) => (
               <mesh key={d.id} position={[d.x, d.y + 0.02, d.z]}>
                 <sphereGeometry args={[0.08, 8, 8]} />
