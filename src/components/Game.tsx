@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Canvas, useThree, useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import { World } from './world';
@@ -311,7 +311,7 @@ function Player({
   );
 }
 
-function Scene({ savedData, onSave, onStats, onHit, recoil, day, onInventory, inventory, onTask, flashlight, setFlashlight, battery, setBattery, onKill }: { savedData?: SaveData; onSave: (d: SaveData) => void; onStats: (h: number, a: number, s: number, w: number) => void; onHit: (point: THREE.Vector3) => void; recoil: { current: number }; day: number; onInventory: (fn: (i: { batteries: number; medkits: number }) => { batteries: number; medkits: number }) => void; inventory: { batteries: number; medkits: number }; onTask: (t: Partial<{ openChest: boolean; killZombies: boolean; findBattery: boolean }>) => void; flashlight: boolean; setFlashlight: (v: boolean) => void; battery: number; setBattery: (v: number | ((x: number) => number)) => void; onKill: () => void }) {
+function Scene({ savedData, onSave, onStats, onHit, recoil, day, giveBattery, completeTasks, flashlight, setFlashlight, battery, setBattery, onKill }: { savedData?: SaveData; onSave: (d: SaveData) => void; onStats: (h: number, a: number, s: number, w: number) => void; onHit: (point: THREE.Vector3) => void; recoil: { current: number }; day: number; giveBattery: () => void; completeTasks: (t: Partial<{ openChest: boolean; killZombies: boolean; findBattery: boolean }>) => void; flashlight: boolean; setFlashlight: (v: boolean) => void; battery: number; setBattery: (v: number | ((x: number) => number)) => void; onKill: () => void }) {
   const { camera, scene } = useThree();
   const enemies = useRef<Enemy[]>([]);
   const pickups = useRef<Pickup[]>([]);
@@ -531,8 +531,8 @@ function Scene({ savedData, onSave, onStats, onHit, recoil, day, onInventory, in
           nearestChest.open = !nearestChest.open;
           if (nearestChest.open && !nearestChest.looted) {
             nearestChest.looted = true;
-            onInventory((i) => ({ ...i, batteries: i.batteries + 1 }));
-            onTask({ openChest: true, findBattery: true });
+            giveBattery();
+            completeTasks({ openChest: true, findBattery: true });
           }
           return;
         }
@@ -555,7 +555,7 @@ function Scene({ savedData, onSave, onStats, onHit, recoil, day, onInventory, in
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, []);
+  }, [giveBattery, completeTasks, setFlashlight, flashlight]);
 
   useFrame(() => {
     recoil.current = Math.max(0, recoil.current - 0.04);
@@ -785,6 +785,13 @@ export default function Game() {
   const [battery, setBattery] = useState(100);
   const [tasks, setTasks] = useState({ openChest: false, killZombies: false, findBattery: false });
   const [kills, setKills] = useState(0);
+  const giveBattery = useCallback(() => setInventory((prev) => ({ ...prev, batteries: prev.batteries + 1 })), []);
+  const completeTasks = useCallback((t: Partial<{ openChest: boolean; killZombies: boolean; findBattery: boolean }>) => setTasks((prev) => ({ ...prev, ...t })), []);
+  const onKill = useCallback(() => setKills((k) => {
+    const next = k + 1;
+    if (next >= 5) setTasks((prev) => ({ ...prev, killZombies: true }));
+    return next;
+  }), []);
   const currentSave = useRef<SaveData | undefined>(undefined);
   const recoilRef = useRef(0);
   const [hitDots, setHitDots] = useState<{ id: number; x: number; y: number; z: number }[]>([]);
@@ -1082,11 +1089,7 @@ export default function Game() {
               setScore(s);
               setDay(w);
               if (h <= 0) setGameOver(true);
-            }} onHit={onHit} recoil={recoilRef} day={day} onInventory={(fn) => setInventory(fn)} inventory={inventory} onTask={(t) => setTasks((prev) => ({ ...prev, ...t }))} flashlight={flashlight} setFlashlight={setFlashlight} battery={battery} setBattery={setBattery} onKill={() => setKills((k) => {
-              const next = k + 1;
-              if (next >= 5) setTasks((prev) => ({ ...prev, killZombies: true }));
-              return next;
-            })} />
+            }} onHit={onHit} recoil={recoilRef} day={day} giveBattery={giveBattery} completeTasks={completeTasks} flashlight={flashlight} setFlashlight={setFlashlight} battery={battery} setBattery={setBattery} onKill={onKill} />
             {hitDots.map((d) => (
               <mesh key={d.id} position={[d.x, d.y + 0.02, d.z]}>
                 <sphereGeometry args={[0.08, 8, 8]} />
