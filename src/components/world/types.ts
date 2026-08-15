@@ -3,6 +3,7 @@ import * as THREE from 'three';
 export interface RegionProps {
   day: number;
   spawnSeed?: number;
+  onCollisionBoxes?: (boxes: THREE.Box3[]) => void;
 }
 
 export interface BuildingDef {

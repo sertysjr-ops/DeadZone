@@ -122,9 +122,9 @@ function createChest(x: number, z: number, rotation: number, scene: THREE.Scene)
   return { id: Date.now() + Math.random(), group, lid, open: false, x, z, looted: false };
 }
 
-function HandWithGun({ recoil }: { recoil: number }) {
+function HandWithGun({ recoil, walkBob }: { recoil: number; walkBob: number }) {
   return (
-    <group position={[0.35, -0.38, -0.55]} rotation={[-0.1 - recoil, 0.25, 0]}>
+    <group position={[0.35, -0.38 + walkBob * 0.06, -0.55]} rotation={[-0.1 - recoil, 0.25, walkBob * 0.05]}>
       {/* arm */}
       <mesh position={[0, -0.12, -0.12]} rotation={[0.3, 0, 0]}>
         <boxGeometry args={[0.14, 0.35, 0.16]} />
@@ -154,11 +154,13 @@ function Player({
   savedRotation,
   onSave,
   recoil,
+  collisionBoxes,
 }: {
   savedPosition?: { x: number; y: number; z: number };
   savedRotation?: { yaw: number; pitch: number };
   onSave: (data: SaveData) => void;
   recoil: number;
+  collisionBoxes: THREE.Box3[];
 }) {
   const { camera, scene } = useThree();
   const yaw = useRef(savedRotation?.yaw ?? 0);
@@ -218,7 +220,10 @@ function Player({
     };
   }, []);
 
-  useFrame(() => {
+  const walkBob = useRef(0);
+  (Player as any).walkBob = walkBob;
+
+  useFrame((state) => {
     const speed = 5;
     const dir = new THREE.Vector3();
     const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
@@ -233,15 +238,42 @@ function Player({
     if (KEY['a']) dir.sub(right);
     if (KEY['d']) dir.add(right);
 
-    if (dir.length() > 0) dir.normalize().multiplyScalar(speed * 0.016);
+    const isMoving = dir.length() > 0;
+    if (isMoving) dir.normalize().multiplyScalar(speed * 0.016);
 
-    camera.position.x += dir.x;
-    camera.position.z += dir.z;
+    // collision check: try X then Z separately so sliding works
+    const playerRadius = 0.4;
+    const nextX = camera.position.clone();
+    nextX.x += dir.x;
+    let collidesX = false;
+    for (const box of collisionBoxes) {
+      if (box.containsPoint(nextX) || box.distanceToPoint(nextX) < playerRadius) {
+        collidesX = true;
+        break;
+      }
+    }
+    if (!collidesX) camera.position.x = nextX.x;
+
+    const nextZ = camera.position.clone();
+    nextZ.z += dir.z;
+    let collidesZ = false;
+    for (const box of collisionBoxes) {
+      if (box.containsPoint(nextZ) || box.distanceToPoint(nextZ) < playerRadius) {
+        collidesZ = true;
+        break;
+      }
+    }
+    if (!collidesZ) camera.position.z = nextZ.z;
+
     camera.position.y = 1.7;
 
     camera.rotation.order = 'YXZ';
     camera.rotation.y = yaw.current;
     camera.rotation.x = pitch.current;
+
+    // walk bob for hand
+    const t = state.clock.elapsedTime;
+    walkBob.current = isMoving ? Math.sin(t * 10) : Math.sin(t * 1.5) * 0.15;
 
     onSave({
       playerPosition: { x: camera.position.x, y: camera.position.y, z: camera.position.z },
@@ -258,7 +290,7 @@ function Player({
     <>
       <spotLight position={camera.position} rotation={camera.rotation} angle={0.6} penumbra={0.4} intensity={80} distance={35} color="#ffccaa" />
       <group position={camera.position} rotation={[camera.rotation.x, camera.rotation.y, 0]}>
-        <HandWithGun recoil={recoil} />
+        <HandWithGun recoil={recoil} walkBob={walkBob.current} />
       </group>
     </>
   );
@@ -701,6 +733,7 @@ export default function Game() {
   const [score, setScore] = useState(0);
   const [day, setDay] = useState(1);
   const [gameOver, setGameOver] = useState(false);
+  const [collisionBoxes, setCollisionBoxes] = useState<THREE.Box3[]>([]);
   const currentSave = useRef<SaveData | undefined>(undefined);
   const recoilRef = useRef(0);
   const [hitDots, setHitDots] = useState<{ id: number; x: number; y: number; z: number }[]>([]);
@@ -956,8 +989,8 @@ export default function Game() {
             <color attach="background" args={['#0f0f12']} />
             <ambientLight intensity={0.25} />
             <directionalLight position={[40, 60, 20]} intensity={0.6} castShadow color="#b0b8c0" />
-            <World day={day} />
-            <Player savedPosition={savedData?.playerPosition} savedRotation={savedData?.playerRotation} onSave={saveGame} recoil={recoilRef.current} />
+            <World day={day} onCollisionBoxes={setCollisionBoxes} />
+            <Player savedPosition={savedData?.playerPosition} savedRotation={savedData?.playerRotation} onSave={saveGame} recoil={recoilRef.current} collisionBoxes={collisionBoxes} />
             <Scene savedData={savedData} onSave={saveGame} onStats={(h, a, s, w) => {
               setHealth(h);
               setAmmo(a);

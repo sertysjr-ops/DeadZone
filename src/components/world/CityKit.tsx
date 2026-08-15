@@ -58,7 +58,7 @@ export function createGround(scene: THREE.Scene) {
   }
 }
 
-export function createBuilding(b: BuildingDef): THREE.Group {
+export function createBuilding(b: BuildingDef): { group: THREE.Group; box: THREE.Box3 } {
   const g = new THREE.Group();
   g.position.set(b.x, 0, b.z);
   g.rotation.y = b.rotation ?? 0;
@@ -154,13 +154,15 @@ export function createBuilding(b: BuildingDef): THREE.Group {
     g.add(trash);
   }
 
-  return g;
+  const box = new THREE.Box3().setFromObject(g);
+  return { group: g, box };
 }
 
-export function createProp(p: PropDef): THREE.Group {
+export function createProp(p: PropDef): { group: THREE.Group; box?: THREE.Box3 } {
   const g = new THREE.Group();
   g.position.set(p.x, 0, p.z);
   g.rotation.y = p.rotation ?? 0;
+  let box: THREE.Box3 | undefined;
 
   switch (p.type) {
     case 'car': {
@@ -185,6 +187,7 @@ export function createProp(p: PropDef): THREE.Group {
         flame.position.set(0, 1, 1.5);
         g.add(flame);
       }
+      box = new THREE.Box3().setFromObject(g);
       break;
     }
     case 'police_car': {
@@ -204,6 +207,7 @@ export function createProp(p: PropDef): THREE.Group {
       const light2 = new THREE.Mesh(new THREE.BoxGeometry(0.25, 0.15, 0.25), new THREE.MeshStandardMaterial({ color: '#0000ff', emissive: '#0000ff', emissiveIntensity: 2 }));
       light2.position.set(0.35, 1.85, 0);
       g.add(light2);
+      box = new THREE.Box3().setFromObject(g);
       break;
     }
     case 'bus': {
@@ -216,6 +220,7 @@ export function createProp(p: PropDef): THREE.Group {
         win.position.set(0, 2, z);
         g.add(win);
       }
+      box = new THREE.Box3().setFromObject(g);
       break;
     }
     case 'truck': {
@@ -228,6 +233,7 @@ export function createProp(p: PropDef): THREE.Group {
       trailer.rotation.z = Math.random() < 0.5 ? 0 : Math.PI;
       castReceive(trailer);
       g.add(trailer);
+      box = new THREE.Box3().setFromObject(g);
       break;
     }
     case 'barricade': {
@@ -237,6 +243,7 @@ export function createProp(p: PropDef): THREE.Group {
         bar.rotation.y = (Math.random() - 0.5) * 0.2;
         g.add(bar);
       }
+      box = new THREE.Box3().setFromObject(g);
       break;
     }
     case 'dumpster': {
@@ -248,15 +255,16 @@ export function createProp(p: PropDef): THREE.Group {
       lid.position.set(0, 1.65, -0.3);
       lid.rotation.x = -0.5;
       g.add(lid);
+      box = new THREE.Box3().setFromObject(g);
       break;
     }
     case 'traffic_light': {
       const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.08, 5.5), mats.metal);
       pole.position.y = 2.75;
       g.add(pole);
-      const box = new THREE.Mesh(new THREE.BoxGeometry(0.5, 1.2, 0.5), mats.metal);
-      box.position.y = 5.2;
-      g.add(box);
+      const boxMesh = new THREE.Mesh(new THREE.BoxGeometry(0.5, 1.2, 0.5), mats.metal);
+      boxMesh.position.y = 5.2;
+      g.add(boxMesh);
       const red = new THREE.Mesh(new THREE.SphereGeometry(0.12), new THREE.MeshStandardMaterial({ color: '#ff0000', emissive: '#ff0000', emissiveIntensity: 1 }));
       red.position.set(0, 5.5, 0.26);
       g.add(red);
@@ -288,6 +296,7 @@ export function createProp(p: PropDef): THREE.Group {
       crate.position.y = 0.5;
       castReceive(crate);
       g.add(crate);
+      box = new THREE.Box3().setFromObject(g);
       break;
     }
     case 'blood': {
@@ -306,5 +315,5 @@ export function createProp(p: PropDef): THREE.Group {
     }
   }
 
-  return g;
+  return { group: g, box };
 }

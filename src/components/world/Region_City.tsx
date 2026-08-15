@@ -6,7 +6,7 @@ import * as THREE from 'three';
 import { createBuilding, createGround, createProp } from './CityKit';
 import { RegionProps } from './types';
 
-export function Region_City({ day }: RegionProps) {
+export function Region_City({ day, onCollisionBoxes }: RegionProps) {
   const { scene } = useThree();
   const seeded = useRef(false);
 
@@ -15,6 +15,8 @@ export function Region_City({ day }: RegionProps) {
     seeded.current = true;
 
     createGround(scene);
+
+    const collisionBoxes: THREE.Box3[] = [];
 
     const buildings: { x: number; z: number; w: number; h: number; d: number; rotation?: number; ruined?: boolean; shop?: boolean; door?: boolean }[] = [
       // north block
@@ -36,7 +38,9 @@ export function Region_City({ day }: RegionProps) {
     ];
 
     for (const b of buildings) {
-      scene.add(createBuilding(b));
+      const built = createBuilding(b);
+      scene.add(built.group);
+      collisionBoxes.push(built.box);
     }
 
     const props = [
@@ -83,8 +87,12 @@ export function Region_City({ day }: RegionProps) {
     ];
 
     for (const p of props) {
-      scene.add(createProp(p));
+      const prop = createProp(p);
+      scene.add(prop.group);
+      if (prop.box) collisionBoxes.push(prop.box);
     }
+
+    onCollisionBoxes?.(collisionBoxes);
 
     // fog & color
     scene.fog = new THREE.FogExp2('#1a1a20', 0.018);
@@ -92,7 +100,7 @@ export function Region_City({ day }: RegionProps) {
     return () => {
       scene.fog = null;
     };
-  }, [scene, day]);
+  }, [scene, day, onCollisionBoxes]);
 
   return null;
 }
