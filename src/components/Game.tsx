@@ -31,6 +31,96 @@ interface Pickup {
   type: 'health' | 'ammo';
 }
 
+interface Door {
+  id: number;
+  frame: THREE.Group;
+  slab: THREE.Mesh;
+  open: boolean;
+  x: number;
+  z: number;
+  width: number;
+}
+
+interface Chest {
+  id: number;
+  group: THREE.Group;
+  lid: THREE.Mesh;
+  open: boolean;
+  x: number;
+  z: number;
+  looted: boolean;
+}
+
+function createDoor(x: number, z: number, rotation: number, width = 2.2, height = 3.2, depth = 0.25, scene: THREE.Scene): Door {
+  const frameMat = new THREE.MeshStandardMaterial({ color: '#2d2d33', roughness: 0.9 });
+  const doorMat = new THREE.MeshStandardMaterial({ color: '#4a2c20', roughness: 0.8 });
+
+  const frame = new THREE.Group();
+  frame.position.set(x, 0, z);
+  frame.rotation.y = rotation;
+
+  const frameThick = 0.35;
+  const left = new THREE.Mesh(new THREE.BoxGeometry(frameThick, height, depth + 0.05), frameMat);
+  left.position.set(-width / 2 - frameThick / 2, height / 2, 0);
+  left.castShadow = true;
+  left.receiveShadow = true;
+  frame.add(left);
+
+  const right = new THREE.Mesh(new THREE.BoxGeometry(frameThick, height, depth + 0.05), frameMat);
+  right.position.set(width / 2 + frameThick / 2, height / 2, 0);
+  right.castShadow = true;
+  right.receiveShadow = true;
+  frame.add(right);
+
+  const top = new THREE.Mesh(new THREE.BoxGeometry(width + frameThick * 2, frameThick, depth + 0.05), frameMat);
+  top.position.set(0, height + frameThick / 2, 0);
+  top.castShadow = true;
+  top.receiveShadow = true;
+  frame.add(top);
+
+  const slab = new THREE.Mesh(new THREE.BoxGeometry(width, height, depth), doorMat);
+  slab.position.set(0, height / 2, 0);
+  slab.castShadow = true;
+  slab.receiveShadow = true;
+  frame.add(slab);
+
+  // handle
+  const handle = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.12, 0.12), new THREE.MeshStandardMaterial({ color: '#aaa' }));
+  handle.position.set(width / 2 - 0.2, height / 2, depth / 2 + 0.06);
+  slab.add(handle);
+
+  scene.add(frame);
+  return { id: Date.now() + Math.random(), frame, slab, open: false, x, z, width };
+}
+
+function createChest(x: number, z: number, rotation: number, scene: THREE.Scene): Chest {
+  const boxMat = new THREE.MeshStandardMaterial({ color: '#5c3a1e', roughness: 0.7 });
+  const metalMat = new THREE.MeshStandardMaterial({ color: '#888', metalness: 0.6, roughness: 0.4 });
+
+  const group = new THREE.Group();
+  group.position.set(x, 0, z);
+  group.rotation.y = rotation;
+
+  const base = new THREE.Mesh(new THREE.BoxGeometry(1.2, 0.7, 0.9), boxMat);
+  base.position.y = 0.35;
+  base.castShadow = true;
+  base.receiveShadow = true;
+  group.add(base);
+
+  const lid = new THREE.Mesh(new THREE.BoxGeometry(1.2, 0.25, 0.9), boxMat);
+  lid.position.set(0, 0.75, -0.45);
+  lid.geometry.translate(0, 0, 0.45);
+  lid.castShadow = true;
+  group.add(lid);
+
+  const lock = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.18, 0.05), metalMat);
+  lock.position.set(0, 0.55, 0.46);
+  group.add(lock);
+
+  scene.add(group);
+  return { id: Date.now() + Math.random(), group, lid, open: false, x, z, looted: false };
+}
+
 function HandWithGun({ recoil }: { recoil: number }) {
   return (
     <group position={[0.35, -0.38, -0.55]} rotation={[-0.1 - recoil, 0.25, 0]}>
@@ -211,6 +301,8 @@ function Scene({ savedData, onSave, onStats, onHit, recoil }: { savedData?: Save
   const { camera, scene } = useThree();
   const enemies = useRef<Enemy[]>([]);
   const pickups = useRef<Pickup[]>([]);
+  const doors = useRef<Door[]>([]);
+  const chests = useRef<Chest[]>([]);
   const wave = useRef(savedData?.wave ?? 1);
   const score = useRef(savedData?.score ?? 0);
   const health = useRef(savedData?.health ?? 100);
@@ -220,6 +312,21 @@ function Scene({ savedData, onSave, onStats, onHit, recoil }: { savedData?: Save
   const spawnedThisWave = useRef(0);
   const lastShot = useRef(0);
   const muzzleFlash = useRef<THREE.PointLight | null>(null);
+  const [prompt, setPrompt] = useState<string | null>(null);
+
+  // spawn doors and chests once
+  useEffect(() => {
+    // doors near some buildings
+    doors.current.push(createDoor(0, -24, 0, 2.2, 3.2, 0.25, scene));
+    doors.current.push(createDoor(-30, -16, Math.PI / 2, 2.2, 3.2, 0.25, scene));
+    doors.current.push(createDoor(28, -12, Math.PI / 4, 2.2, 3.2, 0.25, scene));
+
+    // chests scattered
+    chests.current.push(createChest(-10, 10, Math.PI / 6, scene));
+    chests.current.push(createChest(15, 15, -Math.PI / 8, scene));
+    chests.current.push(createChest(-25, 25, Math.PI / 3, scene));
+    chests.current.push(createChest(30, 8, -Math.PI / 4, scene));
+  }, [scene]);
 
   // sync player saved stats on mount
   useEffect(() => {
@@ -374,6 +481,44 @@ function Scene({ savedData, onSave, onStats, onHit, recoil }: { savedData?: Save
       if (e.key.toLowerCase() === 'r' && !gameOver.current) {
         ammo.current = 30;
       }
+      if (e.key.toLowerCase() === 'e' && !gameOver.current) {
+        let nearest: Door | null = null;
+        let best = Infinity;
+        for (const d of doors.current) {
+          const dx = camera.position.x - d.x;
+          const dz = camera.position.z - d.z;
+          const dist = Math.sqrt(dx * dx + dz * dz);
+          if (dist < 3 && dist < best) {
+            best = dist;
+            nearest = d;
+          }
+        }
+        if (nearest) {
+          nearest.open = !nearest.open;
+        }
+      }
+      if (e.key.toLowerCase() === 'f' && !gameOver.current) {
+        let nearest: Chest | null = null;
+        let best = Infinity;
+        for (const c of chests.current) {
+          const dx = camera.position.x - c.x;
+          const dz = camera.position.z - c.z;
+          const dist = Math.sqrt(dx * dx + dz * dz);
+          if (dist < 2.5 && dist < best) {
+            best = dist;
+            nearest = c;
+          }
+        }
+        if (nearest) {
+          nearest.open = !nearest.open;
+          if (nearest.open && !nearest.looted) {
+            nearest.looted = true;
+            const type = Math.random() > 0.5 ? 'health' : 'ammo';
+            if (type === 'health') health.current = Math.min(100, health.current + 30);
+            else ammo.current = Math.min(60, ammo.current + 15);
+          }
+        }
+      }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
@@ -428,6 +573,36 @@ function Scene({ savedData, onSave, onStats, onHit, recoil }: { savedData?: Save
       }
     }
 
+    // animate doors
+    for (const d of doors.current) {
+      const target = d.open ? -Math.PI / 1.8 : 0;
+      d.slab.rotation.y += (target - d.slab.rotation.y) * 0.1;
+    }
+
+    // animate chests
+    for (const c of chests.current) {
+      const target = c.open ? -Math.PI / 1.8 : 0;
+      c.lid.rotation.x += (target - c.lid.rotation.x) * 0.1;
+    }
+
+    // interaction prompt
+    let nearDoor = false;
+    for (const d of doors.current) {
+      const dx = camera.position.x - d.x;
+      const dz = camera.position.z - d.z;
+      if (Math.sqrt(dx * dx + dz * dz) < 3) nearDoor = true;
+    }
+    let nearChest = false;
+    for (const c of chests.current) {
+      const dx = camera.position.x - c.x;
+      const dz = camera.position.z - c.z;
+      if (Math.sqrt(dx * dx + dz * dz) < 2.5) nearChest = true;
+    }
+    if (nearDoor && nearChest) setPrompt('E — DOOR  ·  F — CHEST');
+    else if (nearDoor) setPrompt('E — OPEN DOOR');
+    else if (nearChest) setPrompt('F — OPEN CHEST');
+    else setPrompt(null);
+
     if (health.current <= 0) {
       health.current = 0;
       gameOver.current = true;
@@ -452,7 +627,17 @@ function Scene({ savedData, onSave, onStats, onHit, recoil }: { savedData?: Save
     onStats(health.current, ammo.current, score.current, wave.current);
   });
 
-  return null;
+  return (
+    <>
+      {prompt && (
+        <div className="pointer-events-none fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-[120%] z-50">
+          <div className="bg-black/70 border border-white/20 backdrop-blur-sm px-4 py-2 rounded-sm text-sm font-black tracking-widest text-white shadow-[0_0_20px_rgba(255,255,255,0.15)]">
+            {prompt}
+          </div>
+        </div>
+      )}
+    </>
+  );
 }
 
 const SAVE_KEY = 'dead-zone-save-v1';
