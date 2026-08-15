@@ -1,9 +1,11 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Canvas, useThree, useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import { World } from './world';
+import { createBuildPiece, createGhost } from './world/CityKit';
+import { TreeState } from './world/types';
 
 const KEY: Record<string, boolean> = {};
 
@@ -50,6 +52,16 @@ interface Chest {
   x: number;
   z: number;
   looted: boolean;
+}
+
+interface FloatingText {
+  id: number;
+  text: string;
+  x: number;
+  y: number;
+  z: number;
+  born: number;
+  color: string;
 }
 
 function createDoor(x: number, z: number, rotation: number, width = 2.2, height = 3.2, depth = 0.25, scene: THREE.Scene): Door {
@@ -165,12 +177,14 @@ function Player({
   onSave,
   recoil,
   collisionBoxes,
+  buildMode,
 }: {
   savedPosition?: { x: number; y: number; z: number };
   savedRotation?: { yaw: number; pitch: number };
   onSave: (data: SaveData) => void;
   recoil: number;
   collisionBoxes: THREE.Box3[];
+  buildMode: { active: boolean; selected: 'wall' | 'stair' | 'roof' };
 }) {
   const { camera, scene } = useThree();
   const yaw = useRef(savedRotation?.yaw ?? 0);
@@ -214,6 +228,7 @@ function Player({
       locked.current = document.pointerLockElement === document.body;
     };
     const onClick = () => {
+      if (buildMode.active) return;
       if (!locked.current) document.body.requestPointerLock?.().catch(() => {});
     };
 
@@ -230,7 +245,7 @@ function Player({
       document.removeEventListener('pointerlockchange', onLock);
       window.removeEventListener('click', onClick);
     };
-  }, []);
+  }, [buildMode.active]);
 
   useFrame((state) => {
     const speed = 5;
@@ -304,19 +319,127 @@ function Player({
   return (
     <>
       <spotLight position={camera.position} rotation={camera.rotation} angle={0.6} penumbra={0.4} intensity={80} distance={35} color="#ffccaa" />
-      <group ref={handRef}>
-        <HandWithGun recoil={recoil} walkBob={walkBob.current} />
-      </group>
+      {!buildMode.active && (
+        <group ref={handRef}>
+          <HandWithGun recoil={recoil} walkBob={walkBob.current} />
+        </group>
+      )}
     </>
   );
 }
 
-function Scene({ savedData, onSave, onStats, onHit, recoil, day, giveBattery, completeTasks, flashlight, setFlashlight, battery, setBattery, onKill }: { savedData?: SaveData; onSave: (d: SaveData) => void; onStats: (h: number, a: number, s: number, w: number) => void; onHit: (point: THREE.Vector3) => void; recoil: { current: number }; day: number; giveBattery: () => void; completeTasks: (t: Partial<{ openChest: boolean; killZombies: boolean; findBattery: boolean }>) => void; flashlight: boolean; setFlashlight: (v: boolean) => void; battery: number; setBattery: (v: number | ((x: number) => number)) => void; onKill: () => void }) {
+function GhostPreview({
+  type,
+  camera,
+  collisionBoxes,
+  onValidChange,
+}: {
+  type: 'wall' | 'stair' | 'roof';
+  camera: THREE.Camera;
+  collisionBoxes: THREE.Box3[];
+  onValidChange: (valid: boolean, box?: THREE.Box3) => void;
+}) {
+  const { scene } = useThree();
+  const ghostRef = useRef<THREE.Group | null>(null);
+  const lastType = useRef(type);
+
+  if (!ghostRef.current || lastType.current !== type) {
+    if (ghostRef.current) scene.remove(ghostRef.current);
+    lastType.current = type;
+    ghostRef.current = createGhost(type);
+    scene.add(ghostRef.current);
+  }
+
+  useEffect(() => {
+    return () => {
+      if (ghostRef.current) scene.remove(ghostRef.current);
+    };
+  }, [scene]);
+
+  useFrame(() => {
+    if (!ghostRef.current) return;
+    const dir = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
+    const pos = camera.position.clone().add(dir.multiplyScalar(5));
+    ghostRef.current.position.copy(pos);
+    ghostRef.current.rotation.y = camera.rotation.y;
+
+    const ghostBox = new THREE.Box3().setFromObject(ghostRef.current);
+    const playerBox = new THREE.Box3().setFromCenterAndSize(camera.position, new THREE.Vector3(0.8, 1.7, 0.8));
+    let overlaps = ghostBox.intersectsBox(playerBox);
+    if (!overlaps) {
+      for (const box of collisionBoxes) {
+        if (ghostBox.intersectsBox(box)) {
+          overlaps = true;
+          break;
+        }
+      }
+    }
+
+    ghostRef.current.traverse((child) => {
+      if ((child as THREE.Mesh).isMesh) {
+        const mat = (child as THREE.Mesh).material as THREE.MeshStandardMaterial;
+        mat.color.set(overlaps ? '#ef4444' : '#22c55e');
+        mat.emissive.set(overlaps ? '#7f1d1d' : '#14532d');
+      }
+    });
+
+    onValidChange(!overlaps, ghostBox);
+  });
+
+  return null;
+}
+
+function Scene({
+  savedData,
+  onSave,
+  onStats,
+  onHit,
+  recoil,
+  day,
+  giveBattery,
+  completeTasks,
+  flashlight,
+  setFlashlight,
+  battery,
+  setBattery,
+  onKill,
+  buildMode,
+  wood,
+  setWood,
+  treesRef,
+  setTrees,
+  collisionBoxes,
+  setCollisionBoxes,
+  setFloating,
+}: {
+  savedData?: SaveData;
+  onSave: (d: SaveData) => void;
+  onStats: (h: number, a: number, s: number, w: number) => void;
+  onHit: (point: THREE.Vector3) => void;
+  recoil: { current: number };
+  day: number;
+  giveBattery: () => void;
+  completeTasks: (t: Partial<{ openChest: boolean; killZombies: boolean; findBattery: boolean }>) => void;
+  flashlight: boolean;
+  setFlashlight: (v: boolean) => void;
+  battery: number;
+  setBattery: (v: number | ((x: number) => number)) => void;
+  onKill: () => void;
+  buildMode: { active: boolean; selected: 'wall' | 'stair' | 'roof' };
+  wood: number;
+  setWood: (v: number | ((x: number) => number)) => void;
+  treesRef: React.MutableRefObject<TreeState[]>;
+  setTrees: (trees: TreeState[]) => void;
+  collisionBoxes: THREE.Box3[];
+  setCollisionBoxes: (boxes: THREE.Box3[] | ((prev: THREE.Box3[]) => THREE.Box3[])) => void;
+  setFloating: (fn: (prev: FloatingText[]) => FloatingText[]) => void;
+}) {
   const { camera, scene } = useThree();
   const enemies = useRef<Enemy[]>([]);
   const pickups = useRef<Pickup[]>([]);
   const doors = useRef<Door[]>([]);
   const chests = useRef<Chest[]>([]);
+  const builtPieces = useRef<{ group: THREE.Group; box: THREE.Box3 }[]>([]);
   const wave = useRef(savedData?.wave ?? 1);
   const score = useRef(savedData?.score ?? 0);
   const health = useRef(savedData?.health ?? 100);
@@ -328,10 +451,14 @@ function Scene({ savedData, onSave, onStats, onHit, recoil, day, giveBattery, co
   const muzzleFlash = useRef<THREE.PointLight | null>(null);
   const [prompt, setPrompt] = useState<string | null>(null);
   const flashlightRef = useRef<THREE.SpotLight | null>(null);
+  const ghostValid = useRef(false);
+  const ghostBox = useRef<THREE.Box3 | undefined>(undefined);
 
   // day scaling: harder each day, spawn more
   const dayRef = useRef(day);
-  useEffect(() => { dayRef.current = day; }, [day]);
+  useEffect(() => {
+    dayRef.current = day;
+  }, [day]);
 
   // spawn doors and chests once
   useEffect(() => {
@@ -496,18 +623,105 @@ function Scene({ savedData, onSave, onStats, onHit, recoil, day, giveBattery, co
     onHit(hitPoint);
   };
 
+  const placeBuildPiece = () => {
+    if (!buildMode.active || !ghostValid.current || !ghostBox.current) return;
+    const cost = buildMode.selected === 'wall' ? 4 : buildMode.selected === 'stair' ? 3 : 6;
+    if (wood < cost) return;
+
+    const piece = createBuildPiece(buildMode.selected);
+    const dir = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
+    const pos = camera.position.clone().add(dir.multiplyScalar(5));
+    piece.group.position.copy(pos);
+    piece.group.rotation.y = camera.rotation.y;
+    scene.add(piece.group);
+
+    builtPieces.current.push(piece);
+    setCollisionBoxes((prev) => [...prev, piece.box]);
+    setWood((w) => w - cost);
+  };
+
+  const chopNearestTree = () => {
+    let nearest: TreeState | null = null;
+    let best = Infinity;
+    for (const t of treesRef.current) {
+      if (t.health <= 0) continue;
+      const dx = camera.position.x - t.x;
+      const dz = camera.position.z - t.z;
+      const dist = Math.sqrt(dx * dx + dz * dz);
+      if (dist < 3.5 && dist < best) {
+        best = dist;
+        nearest = t;
+      }
+    }
+    if (nearest) {
+      nearest.health -= 34;
+      setFloating((prev) => {
+        const next = [
+          ...prev,
+          {
+            id: Date.now() + Math.random(),
+            text: 'HIT TREE',
+            x: nearest!.x,
+            y: 2,
+            z: nearest!.z,
+            born: performance.now(),
+            color: '#ffffff',
+          },
+        ];
+        return next.slice(-20);
+      });
+      if (nearest.health <= 0) {
+        if (nearest.mesh) scene.remove(nearest.mesh);
+        if (nearest.box) {
+          setCollisionBoxes((prev) => prev.filter((b) => b !== nearest!.box));
+        }
+        setWood((w) => w + 2);
+        setFloating((prev) => {
+          const next = [
+            ...prev,
+            {
+              id: Date.now() + Math.random(),
+              text: '+2 WOOD',
+              x: nearest!.x,
+              y: 2.5,
+              z: nearest!.z,
+              born: performance.now(),
+              color: '#f59e0b',
+            },
+          ];
+          return next.slice(-20);
+        });
+        // sync tree state back to ref list
+        setTrees(treesRef.current.map((t) => (t.id === nearest!.id ? { ...t, health: 0 } : t)));
+      } else {
+        setTrees(treesRef.current.map((t) => (t.id === nearest!.id ? { ...t, health: nearest!.health } : t)));
+      }
+    }
+  };
+
   useEffect(() => {
     const onMouseDown = () => {
-      if (document.pointerLockElement === document.body && !gameOver.current) {
+      if (document.pointerLockElement === document.body && !gameOver.current && !buildMode.active) {
         shoot();
+      } else if (buildMode.active) {
+        placeBuildPiece();
       }
     };
     window.addEventListener('mousedown', onMouseDown);
     return () => window.removeEventListener('mousedown', onMouseDown);
-  }, [camera]);
+  }, [camera, buildMode.active, buildMode.selected, wood, collisionBoxes]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      if (buildMode.active) {
+        if (e.key === '1') {
+          // wall
+        } else if (e.key === '2') {
+          // stair
+        } else if (e.key === '3') {
+          // roof
+        }
+      }
       if (e.key.toLowerCase() === 'r' && !gameOver.current) {
         ammo.current = 30;
       }
@@ -515,7 +729,7 @@ function Scene({ savedData, onSave, onStats, onHit, recoil, day, giveBattery, co
         setFlashlight(!flashlight);
       }
       if (e.key.toLowerCase() === 'e' && !gameOver.current) {
-        // prioritize chest over door
+        // prioritize chest over door over tree
         let nearestChest: Chest | null = null;
         let bestChest = Infinity;
         for (const c of chests.current) {
@@ -550,12 +764,15 @@ function Scene({ savedData, onSave, onStats, onHit, recoil, day, giveBattery, co
         }
         if (nearest) {
           nearest.open = !nearest.open;
+          return;
         }
+        // tree
+        chopNearestTree();
       }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [giveBattery, completeTasks, setFlashlight, flashlight]);
+  }, [giveBattery, completeTasks, setFlashlight, flashlight, buildMode.active, wood, collisionBoxes]);
 
   useFrame(() => {
     recoil.current = Math.max(0, recoil.current - 0.04);
@@ -632,8 +849,19 @@ function Scene({ savedData, onSave, onStats, onHit, recoil, day, giveBattery, co
       const dist = Math.sqrt(dx * dx + dz * dz);
       if (dist < 2.5) nearChest = c;
     }
+    let nearTree = false;
+    for (const t of treesRef.current) {
+      if (t.health <= 0) continue;
+      const dx = camera.position.x - t.x;
+      const dz = camera.position.z - t.z;
+      if (Math.sqrt(dx * dx + dz * dz) < 3.5) {
+        nearTree = true;
+        break;
+      }
+    }
     if (nearChest) setPrompt(nearChest.looted ? 'E — CHEST (EMPTY)' : 'E — OPEN CHEST');
     else if (nearDoor) setPrompt('E — OPEN DOOR');
+    else if (nearTree) setPrompt('E — CHOP TREE');
     else setPrompt(null);
 
     // flashlight
@@ -678,6 +906,17 @@ function Scene({ savedData, onSave, onStats, onHit, recoil, day, giveBattery, co
 
   return (
     <>
+      {buildMode.active && (
+        <GhostPreview
+          type={buildMode.selected}
+          camera={camera}
+          collisionBoxes={collisionBoxes}
+          onValidChange={(valid, box) => {
+            ghostValid.current = valid;
+            ghostBox.current = box;
+          }}
+        />
+      )}
       {prompt && (
         <div className="pointer-events-none fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-[120%] z-50">
           <div className="bg-black/70 border border-white/20 backdrop-blur-sm px-4 py-2 rounded-sm text-sm font-black tracking-widest text-white shadow-[0_0_20px_rgba(255,255,255,0.15)]">
@@ -769,6 +1008,50 @@ function MenuBackgroundHands() {
   );
 }
 
+function FloatingTexts({ items }: { items: FloatingText[] }) {
+  const { camera } = useThree();
+  const groupRef = useRef<THREE.Group>(null);
+
+  useFrame(() => {
+    if (!groupRef.current) return;
+    const now = performance.now();
+    groupRef.current.children.forEach((child) => {
+      const data = (child.userData as FloatingText);
+      const age = (now - data.born) / 1000;
+      child.position.set(data.x, data.y + age * 0.8, data.z);
+      (child as THREE.Mesh).lookAt(camera.position);
+      const mat = (child as THREE.Mesh).material as THREE.MeshBasicMaterial;
+      mat.opacity = Math.max(0, 1 - age);
+      const scale = 1 + age * 0.2;
+      child.scale.set(scale, scale, scale);
+    });
+  });
+
+  const visible = useMemo(() => items.filter((i) => performance.now() - i.born < 1200), [items]);
+
+  return (
+    <group ref={groupRef}>
+      {visible.map((item) => {
+        const canvas = document.createElement('canvas');
+        canvas.width = 256;
+        canvas.height = 128;
+        const ctx = canvas.getContext('2d')!;
+        ctx.fillStyle = item.color;
+        ctx.font = 'bold 40px monospace';
+        ctx.textAlign = 'center';
+        ctx.fillText(item.text, 128, 80);
+        const tex = new THREE.CanvasTexture(canvas);
+        return (
+          <mesh key={item.id} userData={item} position={[item.x, item.y, item.z]}>
+            <planeGeometry args={[1.5, 0.75]} />
+            <meshBasicMaterial map={tex} transparent depthWrite={false} side={THREE.DoubleSide} />
+          </mesh>
+        );
+      })}
+    </group>
+  );
+}
+
 export default function Game() {
   const [started, setStarted] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -780,11 +1063,20 @@ export default function Game() {
   const [day, setDay] = useState(1);
   const [gameOver, setGameOver] = useState(false);
   const [collisionBoxes, setCollisionBoxes] = useState<THREE.Box3[]>([]);
-  const [inventory, setInventory] = useState<{ batteries: number; medkits: number }>({ batteries: 0, medkits: 0 });
+  const [inventory, setInventory] = useState<{ batteries: number; medkits: number; wood: number }>({ batteries: 0, medkits: 0, wood: 0 });
   const [flashlight, setFlashlight] = useState(false);
   const [battery, setBattery] = useState(100);
   const [tasks, setTasks] = useState({ openChest: false, killZombies: false, findBattery: false });
   const [kills, setKills] = useState(0);
+  const [buildMode, setBuildMode] = useState<{ active: boolean; selected: 'wall' | 'stair' | 'roof' }>({ active: false, selected: 'wall' });
+  const [trees, setTreesState] = useState<TreeState[]>([]);
+  const treesRef = useRef<TreeState[]>(trees);
+  const [floating, setFloating] = useState<FloatingText[]>([]);
+
+  useEffect(() => {
+    treesRef.current = trees;
+  }, [trees]);
+
   const giveBattery = useCallback(() => setInventory((prev) => ({ ...prev, batteries: prev.batteries + 1 })), []);
   const completeTasks = useCallback((t: Partial<{ openChest: boolean; killZombies: boolean; findBattery: boolean }>) => setTasks((prev) => ({ ...prev, ...t })), []);
   const onKill = useCallback(() => setKills((k) => {
@@ -849,6 +1141,8 @@ export default function Game() {
     setScore(0);
     setDay(1);
     setGameOver(false);
+    setInventory({ batteries: 0, medkits: 0, wood: 0 });
+    setBuildMode({ active: false, selected: 'wall' });
     savedDataHealth = undefined;
     savedDataAmmo = undefined;
     savedDataScore = undefined;
@@ -880,10 +1174,21 @@ export default function Game() {
           return next;
         });
       }
+      if (e.key.toLowerCase() === 'b') {
+        setBuildMode((prev) => ({ ...prev, active: !prev.active }));
+        if (document.pointerLockElement === document.body) document.exitPointerLock?.();
+      }
+      if (buildMode.active) {
+        if (e.key === '1') setBuildMode((prev) => ({ ...prev, selected: 'wall' }));
+        if (e.key === '2') setBuildMode((prev) => ({ ...prev, selected: 'stair' }));
+        if (e.key === '3') setBuildMode((prev) => ({ ...prev, selected: 'roof' }));
+      }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [started, gameOver]);
+  }, [started, gameOver, buildMode.active]);
+
+  const costFor = (type: 'wall' | 'stair' | 'roof') => (type === 'wall' ? 4 : type === 'stair' ? 3 : 6);
 
   return (
     <div className="relative h-screen w-screen bg-black overflow-hidden text-white font-mono select-none">
@@ -970,6 +1275,32 @@ export default function Game() {
                   {gameOver ? 'MAIN MENU' : 'ABANDON RUN'}
                 </button>
               </div>
+              {buildMode.active && (
+                <div className="absolute bottom-8 left-1/2 -translate-x-1/2 z-50 pointer-events-auto">
+                  <div className="bg-black/80 border border-white/20 backdrop-blur-sm p-3 rounded-sm flex items-center gap-2">
+                    {(['wall', 'stair', 'roof'] as const).map((t, idx) => {
+                      const selected = buildMode.selected === t;
+                      const cost = costFor(t);
+                      const canAfford = inventory.wood >= cost;
+                      return (
+                        <button
+                          key={t}
+                          onClick={() => setBuildMode((prev) => ({ ...prev, selected: t }))}
+                          className={`px-4 py-2 min-w-[90px] text-center border rounded-sm font-black tracking-widest text-xs transition-all ${
+                            selected
+                              ? 'bg-green-700 border-green-500 text-white'
+                              : 'bg-zinc-900 border-zinc-700 text-zinc-300 hover:bg-zinc-800'
+                          } ${!canAfford ? 'opacity-60' : ''}`}
+                        >
+                          <div className="uppercase">{t}</div>
+                          <div className={`text-[10px] ${canAfford ? 'text-green-400' : 'text-red-400'}`}>{cost} WOOD</div>
+                          <div className="text-[9px] text-zinc-500 mt-1">{idx + 1}</div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
@@ -1036,6 +1367,9 @@ export default function Game() {
                   <div className="text-white text-sm font-bold tabular-nums">
                     <span className="text-green-400">MED</span> {inventory.medkits}
                   </div>
+                  <div className="text-white text-sm font-bold tabular-nums">
+                    <span className="text-amber-600">WOOD</span> {inventory.wood}
+                  </div>
                 </div>
               </div>
 
@@ -1071,9 +1405,38 @@ export default function Game() {
                   <div><span className="text-white font-bold">CLICK</span> SHOOT</div>
                   <div><span className="text-white font-bold">E</span> INTERACT</div>
                   <div><span className="text-white font-bold">T</span> FLASHLIGHT</div>
+                  <div><span className="text-white font-bold">B</span> BUILD</div>
                   <div><span className="text-white font-bold">ESC</span> MENU</div>
                 </div>
               </div>
+
+              {/* BUILD MODE PANEL */}
+              {buildMode.active && (
+                <div className="fixed bottom-8 left-1/2 -translate-x-1/2 z-50 pointer-events-auto">
+                  <div className="bg-black/80 border border-white/20 backdrop-blur-sm p-3 rounded-sm flex items-center gap-2">
+                    {(['wall', 'stair', 'roof'] as const).map((t, idx) => {
+                      const selected = buildMode.selected === t;
+                      const cost = costFor(t);
+                      const canAfford = inventory.wood >= cost;
+                      return (
+                        <button
+                          key={t}
+                          onClick={() => setBuildMode((prev) => ({ ...prev, selected: t }))}
+                          className={`px-4 py-2 min-w-[90px] text-center border rounded-sm font-black tracking-widest text-xs transition-all ${
+                            selected
+                              ? 'bg-green-700 border-green-500 text-white'
+                              : 'bg-zinc-900 border-zinc-700 text-zinc-300 hover:bg-zinc-800'
+                          } ${!canAfford ? 'opacity-60' : ''}`}
+                        >
+                          <div className="uppercase">{t}</div>
+                          <div className={`text-[10px] ${canAfford ? 'text-green-400' : 'text-red-400'}`}>{cost} WOOD</div>
+                          <div className="text-[9px] text-zinc-500 mt-1">{idx + 1}</div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
             </>
           )}
 
@@ -1081,21 +1444,44 @@ export default function Game() {
             <color attach="background" args={['#0f0f12']} />
             <ambientLight intensity={0.25} />
             <directionalLight position={[40, 60, 20]} intensity={0.6} castShadow color="#b0b8c0" />
-            <World day={day} onCollisionBoxes={setCollisionBoxes} />
-            <Player savedPosition={savedData?.playerPosition} savedRotation={savedData?.playerRotation} onSave={saveGame} recoil={recoilRef.current} collisionBoxes={collisionBoxes} />
-            <Scene savedData={savedData} onSave={saveGame} onStats={(h, a, s, w) => {
-              setHealth(h);
-              setAmmo(a);
-              setScore(s);
-              setDay(w);
-              if (h <= 0) setGameOver(true);
-            }} onHit={onHit} recoil={recoilRef} day={day} giveBattery={giveBattery} completeTasks={completeTasks} flashlight={flashlight} setFlashlight={setFlashlight} battery={battery} setBattery={setBattery} onKill={onKill} />
+            <World day={day} onCollisionBoxes={setCollisionBoxes} onTrees={setTreesState} />
+            <Player savedPosition={savedData?.playerPosition} savedRotation={savedData?.playerRotation} onSave={saveGame} recoil={recoilRef.current} collisionBoxes={collisionBoxes} buildMode={buildMode} />
+            <Scene
+              savedData={savedData}
+              onSave={saveGame}
+              onStats={(h, a, s, w) => {
+                setHealth(h);
+                setAmmo(a);
+                setScore(s);
+                setDay(w);
+                if (h <= 0) setGameOver(true);
+              }}
+              onHit={onHit}
+              recoil={recoilRef}
+              day={day}
+              giveBattery={giveBattery}
+              completeTasks={completeTasks}
+              flashlight={flashlight}
+              setFlashlight={setFlashlight}
+              battery={battery}
+              setBattery={setBattery}
+              onKill={onKill}
+              buildMode={buildMode}
+              wood={inventory.wood}
+              setWood={(v) => setInventory((prev) => ({ ...prev, wood: typeof v === 'function' ? v(prev.wood) : v }))}
+              treesRef={treesRef}
+              setTrees={setTreesState}
+              collisionBoxes={collisionBoxes}
+              setCollisionBoxes={setCollisionBoxes}
+              setFloating={setFloating}
+            />
             {hitDots.map((d) => (
               <mesh key={d.id} position={[d.x, d.y + 0.02, d.z]}>
                 <sphereGeometry args={[0.08, 8, 8]} />
                 <meshBasicMaterial color="#ff0000" transparent opacity={0.8} />
               </mesh>
             ))}
+            <FloatingTexts items={floating} />
           </Canvas>
         </>
       )}

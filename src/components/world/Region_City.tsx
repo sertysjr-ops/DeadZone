@@ -4,9 +4,9 @@ import { useEffect, useRef } from 'react';
 import { useThree } from '@react-three/fiber';
 import * as THREE from 'three';
 import { createBuilding, createGround, createProp } from './CityKit';
-import { RegionProps } from './types';
+import { RegionProps, TreeState } from './types';
 
-export function Region_City({ day, onCollisionBoxes }: RegionProps) {
+export function Region_City({ day, onCollisionBoxes, onTrees }: RegionProps) {
   const { scene } = useThree();
   const seeded = useRef(false);
 
@@ -84,13 +84,35 @@ export function Region_City({ day, onCollisionBoxes }: RegionProps) {
         z: (Math.random() - 0.5) * 140,
         rotation: Math.random() * Math.PI,
       })),
+      // dead trees (choppable)
+      ...Array.from({ length: 30 }).map((_, i) => ({
+        type: (Math.random() > 0.7 ? 'tree_fallen' : 'tree_dead') as 'tree_dead' | 'tree_fallen',
+        x: (Math.random() - 0.5) * 160,
+        z: (Math.random() - 0.5) * 160,
+        rotation: Math.random() * Math.PI,
+        health: 100,
+      })),
     ];
+
+    const spawnedTrees: TreeState[] = [];
 
     for (const p of props) {
       const prop = createProp(p);
       scene.add(prop.group);
       if (prop.box) collisionBoxes.push(prop.box);
+      if (p.type === 'tree_dead' || p.type === 'tree_fallen') {
+        spawnedTrees.push({
+          id: `${p.x.toFixed(2)},${p.z.toFixed(2)}`,
+          x: p.x,
+          z: p.z,
+          health: p.health ?? 100,
+          mesh: prop.group,
+          box: prop.box,
+        });
+      }
     }
+
+    onTrees?.(spawnedTrees);
 
     onCollisionBoxes?.(collisionBoxes);
 

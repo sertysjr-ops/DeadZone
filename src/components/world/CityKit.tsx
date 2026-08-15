@@ -10,11 +10,15 @@ const mats = {
   window: new THREE.MeshStandardMaterial({ color: '#1a2a3a', roughness: 0.2, metalness: 0.6 }),
   brokenWindow: new THREE.MeshStandardMaterial({ color: '#1a1a1a', roughness: 1 }),
   wood: new THREE.MeshStandardMaterial({ color: '#5c3a1e', roughness: 0.9 }),
+  bark: new THREE.MeshStandardMaterial({ color: '#3a2a1e', roughness: 1 }),
+  deadLeaf: new THREE.MeshStandardMaterial({ color: '#4a3a22', roughness: 0.95 }),
   metal: new THREE.MeshStandardMaterial({ color: '#555', roughness: 0.5, metalness: 0.6 }),
   police: new THREE.MeshStandardMaterial({ color: '#1e3a5f', roughness: 0.5 }),
   fire: new THREE.MeshStandardMaterial({ color: '#ff6b35', emissive: '#aa2200', emissiveIntensity: 2 }),
   blood: new THREE.MeshStandardMaterial({ color: '#5a0a0a', roughness: 1 }),
   glow: new THREE.MeshStandardMaterial({ color: '#ffaa00', emissive: '#ffaa00', emissiveIntensity: 3 }),
+  ghost: new THREE.MeshStandardMaterial({ color: '#22c55e', transparent: true, opacity: 0.4, depthWrite: false }),
+  buildWood: new THREE.MeshStandardMaterial({ color: '#6b4a2e', roughness: 0.9 }),
 };
 
 function castReceive(mesh: THREE.Mesh) {
@@ -313,7 +317,80 @@ export function createProp(p: PropDef): { group: THREE.Group; box?: THREE.Box3 }
       g.add(trash);
       break;
     }
+    case 'tree_dead': {
+      const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.25, 0.4, 3.5, 10), mats.bark);
+      trunk.position.y = 1.75;
+      castReceive(trunk);
+      g.add(trunk);
+      const crown = new THREE.Mesh(new THREE.DodecahedronGeometry(1.4, 0), mats.deadLeaf);
+      crown.position.y = 3.8;
+      castReceive(crown);
+      g.add(crown);
+      for (let i = 0; i < 4; i++) {
+        const branch = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.1, 1.2, 6), mats.bark);
+        branch.position.set(Math.cos(i * Math.PI / 2) * 0.8, 3.2 + Math.random() * 0.5, Math.sin(i * Math.PI / 2) * 0.8);
+        branch.rotation.z = Math.PI / 4;
+        branch.rotation.y = i * Math.PI / 2;
+        g.add(branch);
+      }
+      box = new THREE.Box3().setFromObject(g);
+      break;
+    }
+    case 'tree_fallen': {
+      const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.35, 4.5, 10), mats.bark);
+      trunk.position.set(0, 0.3, 0);
+      trunk.rotation.z = Math.PI / 2;
+      trunk.rotation.y = Math.random() * Math.PI;
+      castReceive(trunk);
+      g.add(trunk);
+      box = new THREE.Box3().setFromObject(g);
+      break;
+    }
   }
 
+  return { group: g, box };
+}
+
+export function createGhost(type: 'wall' | 'stair' | 'roof'): THREE.Group {
+  const g = new THREE.Group();
+  if (type === 'wall') {
+    const m = new THREE.Mesh(new THREE.BoxGeometry(0.3, 2.5, 3), mats.ghost);
+    m.position.y = 1.25;
+    g.add(m);
+  } else if (type === 'stair') {
+    for (let i = 0; i < 4; i++) {
+      const step = new THREE.Mesh(new THREE.BoxGeometry(1.5, 0.25, 0.6), mats.ghost);
+      step.position.set(0, 0.3 + i * 0.5, -i * 0.55);
+      g.add(step);
+    }
+  } else if (type === 'roof') {
+    const m = new THREE.Mesh(new THREE.BoxGeometry(3.2, 0.15, 3.2), mats.ghost);
+    m.position.y = 2.6;
+    g.add(m);
+  }
+  return g;
+}
+
+export function createBuildPiece(type: 'wall' | 'stair' | 'roof'): { group: THREE.Group; box: THREE.Box3 } {
+  const g = new THREE.Group();
+  if (type === 'wall') {
+    const m = new THREE.Mesh(new THREE.BoxGeometry(0.3, 2.5, 3), mats.buildWood);
+    m.position.y = 1.25;
+    castReceive(m);
+    g.add(m);
+  } else if (type === 'stair') {
+    for (let i = 0; i < 4; i++) {
+      const step = new THREE.Mesh(new THREE.BoxGeometry(1.5, 0.25, 0.6), mats.buildWood);
+      step.position.set(0, 0.3 + i * 0.5, -i * 0.55);
+      castReceive(step);
+      g.add(step);
+    }
+  } else if (type === 'roof') {
+    const m = new THREE.Mesh(new THREE.BoxGeometry(3.2, 0.15, 3.2), mats.buildWood);
+    m.position.y = 2.6;
+    castReceive(m);
+    g.add(m);
+  }
+  const box = new THREE.Box3().setFromObject(g);
   return { group: g, box };
 }

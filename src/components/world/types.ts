@@ -4,6 +4,7 @@ export interface RegionProps {
   day: number;
   spawnSeed?: number;
   onCollisionBoxes?: (boxes: THREE.Box3[]) => void;
+  onTrees?: (trees: TreeState[]) => void;
 }
 
 export interface BuildingDef {
@@ -21,8 +22,19 @@ export interface BuildingDef {
 }
 
 export interface PropDef {
-  type: 'car' | 'police_car' | 'bus' | 'truck' | 'barricade' | 'dumpster' | 'trash' | 'blood' | 'cone' | 'crate' | 'traffic_light' | 'street_lamp';
+  type: 'car' | 'police_car' | 'bus' | 'truck' | 'barricade' | 'dumpster' | 'trash' | 'blood' | 'cone' | 'crate' | 'traffic_light' | 'street_lamp' | 'tree_dead' | 'tree_fallen';
   x: number;
   z: number;
   rotation?: number;
+  health?: number;
+  chopped?: boolean;
+}
+
+export interface TreeState {
+  id: string;
+  x: number;
+  z: number;
+  health: number;
+  mesh?: THREE.Group;
+  box?: THREE.Box3;
 }
