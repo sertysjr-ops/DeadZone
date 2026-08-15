@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Canvas, useThree, useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
+import { World } from './world';
 
 const KEY: Record<string, boolean> = {};
 
@@ -148,40 +149,6 @@ function HandWithGun({ recoil }: { recoil: number }) {
   );
 }
 
-function World() {
-  return (
-    <>
-      <color attach="background" args={['#1a1a20']} />
-      <ambientLight intensity={0.6} />
-      <directionalLight position={[20, 40, 10]} intensity={1.2} castShadow color="#ffffff" />
-      <pointLight position={[0, 8, 0]} intensity={0.5} color="#ff4444" distance={40} />
-
-      <mesh rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
-        <planeGeometry args={[300, 300]} />
-        <meshStandardMaterial color="#252528" roughness={1} />
-      </mesh>
-
-      <gridHelper args={[300, 150, '#444', '#333']} position={[0, 0.05, 0]} />
-
-      {/* scattered buildings */}
-      {[
-        [0, 3, -30, 12, 6, 12],
-        [-30, 4, -20, 8, 8, 8],
-        [28, 2.5, -15, 10, 5, 10],
-        [-18, 3.5, 22, 9, 7, 9],
-        [22, 4, 25, 7, 8, 7],
-        [-35, 2, 10, 6, 4, 6],
-        [35, 3, 5, 8, 6, 8],
-      ].map(([x, y, z, w, h, d], i) => (
-        <mesh key={i} position={[x as number, y as number, z as number]} castShadow receiveShadow>
-          <boxGeometry args={[w as number, h as number, d as number]} />
-          <meshStandardMaterial color="#3a3a42" roughness={0.9} />
-        </mesh>
-      ))}
-    </>
-  );
-}
-
 function Player({
   savedPosition,
   savedRotation,
@@ -297,7 +264,7 @@ function Player({
   );
 }
 
-function Scene({ savedData, onSave, onStats, onHit, recoil }: { savedData?: SaveData; onSave: (d: SaveData) => void; onStats: (h: number, a: number, s: number, w: number) => void; onHit: (point: THREE.Vector3) => void; recoil: { current: number } }) {
+function Scene({ savedData, onSave, onStats, onHit, recoil, day }: { savedData?: SaveData; onSave: (d: SaveData) => void; onStats: (h: number, a: number, s: number, w: number) => void; onHit: (point: THREE.Vector3) => void; recoil: { current: number }; day: number }) {
   const { camera, scene } = useThree();
   const enemies = useRef<Enemy[]>([]);
   const pickups = useRef<Pickup[]>([]);
@@ -313,6 +280,10 @@ function Scene({ savedData, onSave, onStats, onHit, recoil }: { savedData?: Save
   const lastShot = useRef(0);
   const muzzleFlash = useRef<THREE.PointLight | null>(null);
   const [prompt, setPrompt] = useState<string | null>(null);
+
+  // day scaling: harder each day, spawn more
+  const dayRef = useRef(day);
+  useEffect(() => { dayRef.current = day; }, [day]);
 
   // spawn doors and chests once
   useEffect(() => {
@@ -528,16 +499,16 @@ function Scene({ savedData, onSave, onStats, onHit, recoil }: { savedData?: Save
     recoil.current = Math.max(0, recoil.current - 0.04);
     if (gameOver.current) return;
 
-    // wave spawning
-    const waveSize = 5 + wave.current * 3;
+    // wave spawning — scale by day
+    const waveSize = 5 + dayRef.current * 4;
     spawnTimer.current += 0.016;
-    if (spawnedThisWave.current < waveSize && spawnTimer.current > Math.max(1.5, 3.5 - wave.current * 0.15)) {
+    if (spawnedThisWave.current < waveSize && spawnTimer.current > Math.max(0.8, 3 - dayRef.current * 0.1)) {
       spawnEnemy();
       spawnedThisWave.current++;
       spawnTimer.current = 0;
     }
     if (spawnedThisWave.current >= waveSize && enemies.current.filter((e) => !e.dead).length === 0) {
-      wave.current++;
+      dayRef.current++;
       spawnedThisWave.current = 0;
       spawnTimer.current = 0;
       health.current = Math.min(100, health.current + 20);
@@ -624,7 +595,7 @@ function Scene({ savedData, onSave, onStats, onHit, recoil }: { savedData?: Save
       }
     }
 
-    onStats(health.current, ammo.current, score.current, wave.current);
+    onStats(health.current, ammo.current, score.current, dayRef.current);
   });
 
   return (
@@ -728,7 +699,7 @@ export default function Game() {
   const [health, setHealth] = useState(100);
   const [ammo, setAmmo] = useState(30);
   const [score, setScore] = useState(0);
-  const [wave, setWave] = useState(1);
+  const [day, setDay] = useState(1);
   const [gameOver, setGameOver] = useState(false);
   const currentSave = useRef<SaveData | undefined>(undefined);
   const recoilRef = useRef(0);
@@ -785,7 +756,7 @@ export default function Game() {
     setHealth(100);
     setAmmo(30);
     setScore(0);
-    setWave(1);
+    setDay(1);
     setGameOver(false);
     savedDataHealth = undefined;
     savedDataAmmo = undefined;
@@ -799,6 +770,13 @@ export default function Game() {
     setStarted(true);
     setMenuOpen(false);
   };
+
+  // starter screen particle / title animation
+  const [titlePulse, setTitlePulse] = useState(0);
+  useEffect(() => {
+    const iv = setInterval(() => setTitlePulse((p) => (p + 1) % 2), 2000);
+    return () => clearInterval(iv);
+  }, []);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -819,27 +797,47 @@ export default function Game() {
   return (
     <div className="relative h-screen w-screen bg-black overflow-hidden text-white font-mono select-none">
       {!started ? (
-        <div className="absolute inset-0 z-50 flex flex-col items-center justify-center bg-gradient-to-br from-black via-zinc-950 to-red-950">
+        <div className="absolute inset-0 z-50 flex flex-col items-center justify-center bg-black overflow-hidden">
           <MenuBackgroundHands />
-          <div className="relative z-20 text-center space-y-6 p-8">
-            <h1 className="text-6xl md:text-8xl font-black tracking-tighter text-red-500 drop-shadow-[0_0_30px_rgba(220,38,38,0.8)]">
-              DEAD ZONE
-            </h1>
-            <div className="flex flex-col items-center gap-3 pt-4">
+          {/* scanlines */}
+          <div className="absolute inset-0 bg-[linear-gradient(rgba(18,16,16,0)_50%,rgba(0,0,0,0.25)_50%),linear-gradient(90deg,rgba(255,0,0,0.06),rgba(0,255,0,0.02),rgba(0,0,255,0.06))] bg-[length:100%_4px,6px_100%] pointer-events-none z-10" />
+          {/* vignette */}
+          <div className="absolute inset-0 bg-[radial-gradient(circle,transparent_40%,rgba(0,0,0,0.85)_100%)] pointer-events-none z-10" />
+          {/* title */}
+          <div className="relative z-20 text-center space-y-8 p-8">
+            <div className="relative">
+              <h1
+                className={`text-7xl md:text-9xl font-black tracking-tighter text-red-600 transition-all duration-1000 ${titlePulse ? 'drop-shadow-[0_0_60px_rgba(220,38,38,0.9)] scale-105' : 'drop-shadow-[0_0_20px_rgba(220,38,38,0.5)] scale-100'}`}
+              >
+                DEAD ZONE
+              </h1>
+              <div className="absolute -bottom-3 left-0 right-0 h-1 bg-gradient-to-r from-transparent via-red-600 to-transparent opacity-60" />
+              <p className="text-zinc-500 text-xs md:text-sm tracking-[0.5em] mt-4 font-bold">SURVIVE THE NIGHT. DISCOVER THE TRUTH.</p>
+            </div>
+
+            <div className="flex flex-col items-center gap-3 pt-6">
               <button
                 onClick={handleNewGame}
-                className="px-10 py-4 bg-red-600 hover:bg-red-500 text-black font-black text-xl rounded-sm tracking-widest transition-all hover:scale-105 shadow-[0_0_30px_rgba(220,38,38,0.4)]"
+                className="group relative px-14 py-5 bg-red-700 hover:bg-red-600 text-black font-black text-2xl rounded-sm tracking-[0.2em] transition-all hover:scale-105 shadow-[0_0_40px_rgba(220,38,38,0.4)] overflow-hidden"
               >
-                NEW GAME
+                <span className="relative z-10">PLAY</span>
+                <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/20 to-transparent -translate-x-full group-hover:translate-x-full transition-transform duration-500" />
               </button>
               {hasSave && (
                 <button
                   onClick={handleContinue}
-                  className="px-10 py-3 bg-zinc-800 hover:bg-zinc-700 text-white font-bold text-lg rounded-sm tracking-widest transition-all hover:scale-105 border border-white/10"
+                  className="px-12 py-3 bg-zinc-900 hover:bg-zinc-800 text-white font-bold text-lg rounded-sm tracking-widest transition-all hover:scale-105 border border-white/10"
                 >
-                  CONTINUE {savedData && <span className="block text-xs font-normal text-zinc-400">{formatTime(savedData.timestamp)}</span>}
+                  CONTINUE {savedData && <span className="block text-xs font-normal text-zinc-500">{formatTime(savedData.timestamp)}</span>}
                 </button>
               )}
+              <button className="px-10 py-2 text-zinc-600 hover:text-zinc-400 text-sm font-bold tracking-widest transition-colors">SETTINGS</button>
+            </div>
+
+            <div className="pt-8 flex justify-center gap-8 text-[10px] text-zinc-700 font-mono tracking-widest">
+              <span>V 0.2.0</span>
+              <span>DEAD CITY // REGION 1</span>
+              <span>OFFLINE MODE</span>
             </div>
           </div>
         </div>
@@ -925,7 +923,7 @@ export default function Game() {
               {/* TOP RIGHT: WAVE / SCORE */}
               <div className="pointer-events-none fixed top-5 right-5 z-40 text-right">
                 <div className="bg-black/60 border border-cyan-900/40 backdrop-blur-sm p-3 rounded-sm shadow-[0_0_20px_rgba(6,182,212,0.15)]">
-                  <div className="text-cyan-400 font-black text-2xl tracking-tighter leading-none">WAVE {wave}</div>
+                  <div className="text-cyan-400 font-black text-2xl tracking-tighter leading-none">DAY {day}</div>
                   <div className="text-zinc-400 text-xs font-bold tracking-widest mt-1">SCORE <span className="text-white">{score}</span></div>
                 </div>
               </div>
@@ -955,15 +953,18 @@ export default function Game() {
           )}
 
           <Canvas shadows camera={{ position: [0, 1.7, 0], fov: 75 }}>
-            <World />
+            <color attach="background" args={['#0f0f12']} />
+            <ambientLight intensity={0.25} />
+            <directionalLight position={[40, 60, 20]} intensity={0.6} castShadow color="#b0b8c0" />
+            <World day={day} />
             <Player savedPosition={savedData?.playerPosition} savedRotation={savedData?.playerRotation} onSave={saveGame} recoil={recoilRef.current} />
             <Scene savedData={savedData} onSave={saveGame} onStats={(h, a, s, w) => {
               setHealth(h);
               setAmmo(a);
               setScore(s);
-              setWave(w);
+              setDay(w);
               if (h <= 0) setGameOver(true);
-            }} onHit={onHit} recoil={recoilRef} />
+            }} onHit={onHit} recoil={recoilRef} day={day} />
             {hitDots.map((d) => (
               <mesh key={d.id} position={[d.x, d.y + 0.02, d.z]}>
                 <sphereGeometry args={[0.08, 8, 8]} />
