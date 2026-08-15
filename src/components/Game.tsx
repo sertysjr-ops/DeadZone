@@ -6,6 +6,7 @@ import * as THREE from 'three';
 import { World } from './world';
 import { createBuildPiece, createGhost } from './world/CityKit';
 import { TreeState } from './world/types';
+import { Minimap, WorldSnapshot } from './Minimap';
 
 const KEY: Record<string, boolean> = {};
 
@@ -178,6 +179,9 @@ function Player({
   recoil,
   collisionBoxes,
   buildMode,
+  worldRef,
+  exploredRef,
+  onExplore,
 }: {
   savedPosition?: { x: number; y: number; z: number };
   savedRotation?: { yaw: number; pitch: number };
@@ -185,6 +189,9 @@ function Player({
   recoil: number;
   collisionBoxes: THREE.Box3[];
   buildMode: { active: boolean; selected: 'wall' | 'stair' | 'roof' };
+  worldRef: React.MutableRefObject<WorldSnapshot>;
+  exploredRef: React.MutableRefObject<boolean[][]>;
+  onExplore: () => void;
 }) {
   const { camera, scene } = useThree();
   const yaw = useRef(savedRotation?.yaw ?? 0);
@@ -305,6 +312,12 @@ function Player({
       handRef.current.rotation.set(camera.rotation.x, camera.rotation.y, 0);
     }
 
+    // minimap data
+    worldRef.current.player.x = camera.position.x;
+    worldRef.current.player.z = camera.position.z;
+    worldRef.current.player.yaw = yaw.current;
+    onExplore();
+
     onSave({
       playerPosition: { x: camera.position.x, y: camera.position.y, z: camera.position.z },
       playerRotation: { yaw: yaw.current, pitch: pitch.current },
@@ -411,6 +424,7 @@ function Scene({
   collisionBoxes,
   setCollisionBoxes,
   setFloating,
+  worldRef,
 }: {
   savedData?: SaveData;
   onSave: (d: SaveData) => void;
@@ -433,6 +447,7 @@ function Scene({
   collisionBoxes: THREE.Box3[];
   setCollisionBoxes: (boxes: THREE.Box3[] | ((prev: THREE.Box3[]) => THREE.Box3[])) => void;
   setFloating: (fn: (prev: FloatingText[]) => FloatingText[]) => void;
+  worldRef: React.MutableRefObject<WorldSnapshot>;
 }) {
   const { camera, scene } = useThree();
   const enemies = useRef<Enemy[]>([]);
@@ -902,6 +917,11 @@ function Scene({
     }
 
     onStats(health.current, ammo.current, score.current, dayRef.current);
+
+    // sync minimap data
+    worldRef.current.enemies = enemies.current.filter((e) => !e.dead).map((e) => ({ x: e.mesh.position.x, z: e.mesh.position.z }));
+    worldRef.current.chests = chests.current.map((c) => ({ x: c.x, z: c.z }));
+    worldRef.current.doors = doors.current.map((d) => ({ x: d.x, z: d.z }));
   });
 
   return (
@@ -1077,6 +1097,14 @@ export default function Game() {
     treesRef.current = trees;
   }, [trees]);
 
+  useEffect(() => {
+    worldRef.current.trees = trees;
+  }, [trees]);
+
+  useEffect(() => {
+    worldRef.current.collisionBoxes = collisionBoxes;
+  }, [collisionBoxes]);
+
   const giveBattery = useCallback(() => setInventory((prev) => ({ ...prev, batteries: prev.batteries + 1 })), []);
   const completeTasks = useCallback((t: Partial<{ openChest: boolean; killZombies: boolean; findBattery: boolean }>) => setTasks((prev) => ({ ...prev, ...t })), []);
   const onKill = useCallback(() => setKills((k) => {
@@ -1087,6 +1115,47 @@ export default function Game() {
   const currentSave = useRef<SaveData | undefined>(undefined);
   const recoilRef = useRef(0);
   const [hitDots, setHitDots] = useState<{ id: number; x: number; y: number; z: number }[]>([]);
+
+  // minimap state
+  const [showMap, setShowMap] = useState(false);
+  const exploredGrid = useMemo(() => {
+    const grid: boolean[][] = [];
+    for (let i = 0; i < 100; i++) {
+      grid[i] = new Array(100).fill(false);
+    }
+    return grid;
+  }, []);
+  const exploredRef = useRef(exploredGrid);
+  const worldRef = useRef<WorldSnapshot>({
+    player: { x: 0, z: 0, yaw: 0 },
+    enemies: [],
+    chests: [],
+    doors: [],
+    collisionBoxes: [],
+    trees: [],
+  });
+
+  const updateExplored = useCallback(() => {
+    const { player } = worldRef.current;
+    const explored = exploredRef.current;
+    const radiusCells = 7.5; // 15 unit radius / 2 cell size
+    const cx = Math.floor((player.x + 100) / 2);
+    const cz = Math.floor((player.z + 100) / 2);
+    for (let dx = -8; dx <= 8; dx++) {
+      for (let dz = -8; dz <= 8; dz++) {
+        if (dx * dx + dz * dz > radiusCells * radiusCells) continue;
+        const gx = cx + dx;
+        const gz = cz + dz;
+        if (gx >= 0 && gx < 100 && gz >= 0 && gz < 100) {
+          explored[gx][gz] = true;
+        }
+      }
+    }
+  }, []);
+
+  const onExplore = useCallback(() => {
+    updateExplored();
+  }, [updateExplored]);
 
   const onHit = (point: THREE.Vector3) => {
     const id = Date.now() + Math.random();
@@ -1177,6 +1246,9 @@ export default function Game() {
       if (e.key.toLowerCase() === 'b') {
         setBuildMode((prev) => ({ ...prev, active: !prev.active }));
         if (document.pointerLockElement === document.body) document.exitPointerLock?.();
+      }
+      if (e.key.toLowerCase() === 'm') {
+        setShowMap((prev) => !prev);
       }
       if (buildMode.active) {
         if (e.key === '1') setBuildMode((prev) => ({ ...prev, selected: 'wall' }));
@@ -1406,6 +1478,7 @@ export default function Game() {
                   <div><span className="text-white font-bold">E</span> INTERACT</div>
                   <div><span className="text-white font-bold">T</span> FLASHLIGHT</div>
                   <div><span className="text-white font-bold">B</span> BUILD</div>
+                  <div><span className="text-white font-bold">M</span> MAP</div>
                   <div><span className="text-white font-bold">ESC</span> MENU</div>
                 </div>
               </div>
@@ -1440,12 +1513,24 @@ export default function Game() {
             </>
           )}
 
+          <Minimap show={showMap} worldRef={worldRef} exploredRef={exploredRef} />
+
           <Canvas shadows camera={{ position: [0, 1.7, 0], fov: 75 }}>
             <color attach="background" args={['#0f0f12']} />
             <ambientLight intensity={0.25} />
             <directionalLight position={[40, 60, 20]} intensity={0.6} castShadow color="#b0b8c0" />
             <World day={day} onCollisionBoxes={setCollisionBoxes} onTrees={setTreesState} />
-            <Player savedPosition={savedData?.playerPosition} savedRotation={savedData?.playerRotation} onSave={saveGame} recoil={recoilRef.current} collisionBoxes={collisionBoxes} buildMode={buildMode} />
+            <Player
+              savedPosition={savedData?.playerPosition}
+              savedRotation={savedData?.playerRotation}
+              onSave={saveGame}
+              recoil={recoilRef.current}
+              collisionBoxes={collisionBoxes}
+              buildMode={buildMode}
+              worldRef={worldRef}
+              exploredRef={exploredRef}
+              onExplore={onExplore}
+            />
             <Scene
               savedData={savedData}
               onSave={saveGame}
@@ -1474,6 +1559,7 @@ export default function Game() {
               collisionBoxes={collisionBoxes}
               setCollisionBoxes={setCollisionBoxes}
               setFloating={setFloating}
+              worldRef={worldRef}
             />
             {hitDots.map((d) => (
               <mesh key={d.id} position={[d.x, d.y + 0.02, d.z]}>
